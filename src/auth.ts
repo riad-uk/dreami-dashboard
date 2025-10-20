@@ -6,13 +6,14 @@ const allowedEmails = process.env.ALLOWED_EMAILS?.split(",").map(email => email.
 
 // Validate required environment variables
 if (!process.env.AUTH_SECRET) {
-  console.error("Missing AUTH_SECRET environment variable")
+  console.error("❌ Missing AUTH_SECRET environment variable")
+  console.error("Available env vars:", Object.keys(process.env).filter(key => key.includes('AUTH')))
 }
 if (!process.env.GOOGLE_CLIENT_ID) {
-  console.error("Missing GOOGLE_CLIENT_ID environment variable")
+  console.error("❌ Missing GOOGLE_CLIENT_ID environment variable")
 }
 if (!process.env.GOOGLE_CLIENT_SECRET) {
-  console.error("Missing GOOGLE_CLIENT_SECRET environment variable")
+  console.error("❌ Missing GOOGLE_CLIENT_SECRET environment variable")
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
