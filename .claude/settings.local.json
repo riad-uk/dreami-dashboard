@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(openssl rand:*)",
+      "Bash(curl:*)",
+      "WebSearch",
+      "WebFetch(domain:api.youcanbook.me)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
