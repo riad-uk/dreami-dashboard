@@ -5,6 +5,7 @@ import Google from "next-auth/providers/google"
 const allowedEmails = process.env.ALLOWED_EMAILS?.split(",").map(email => email.trim()) || []
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  trustHost: true, // Allow NextAuth to auto-detect the host from the request
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
