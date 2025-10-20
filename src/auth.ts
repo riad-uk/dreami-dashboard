@@ -1,6 +1,9 @@
 import NextAuth from "next-auth"
 import Google from "next-auth/providers/google"
 
+// Get allowed emails from environment variable
+const allowedEmails = process.env.ALLOWED_EMAILS?.split(",").map(email => email.trim()) || []
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     Google({
@@ -12,6 +15,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     signIn: "/auth/signin",
   },
   callbacks: {
+    async signIn({ user, account, profile }) {
+      // If no allowed emails are configured, allow all users
+      if (allowedEmails.length === 0) {
+        return true
+      }
+
+      // Check if the user's email is in the allowed list
+      if (user.email && allowedEmails.includes(user.email)) {
+        return true
+      }
+
+      // Deny access if email is not in the allowed list
+      return false
+    },
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user
       const isOnDashboard = nextUrl.pathname.startsWith("/dashboard")
