@@ -5,7 +5,9 @@
       "Bash(openssl rand:*)",
       "Bash(curl:*)",
       "WebSearch",
-      "WebFetch(domain:api.youcanbook.me)"
+      "WebFetch(domain:api.youcanbook.me)",
+      "Bash(git add src/auth.ts)",
+      "Bash(git commit -m \"Add explicit AUTH_SECRET config and env validation for Vercel\")"
     ],
     "deny": [],
     "ask": []
