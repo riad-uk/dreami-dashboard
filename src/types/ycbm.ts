@@ -17,6 +17,7 @@ export interface YCBMBooking {
   noShow: boolean
   createdAt: string
   organizer: string
+  intentId?: string
   legacy?: {
     appointmentTypes?: Array<{
       id: string

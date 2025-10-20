@@ -3,7 +3,7 @@ import { auth } from "@/auth"
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth()
 
@@ -11,7 +11,7 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const intentId = params.id
+  const { id: intentId } = await params
   const apiKey = process.env.YCBM_API_KEY
   const userId = process.env.YCBM_USER_ID
 
