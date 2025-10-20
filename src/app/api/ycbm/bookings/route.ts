@@ -14,7 +14,18 @@ export async function GET(request: NextRequest) {
   const apiKey = process.env.YCBM_API_KEY
   const userId = process.env.YCBM_USER_ID
 
+  console.log("Environment check:", {
+    hasApiKey: !!apiKey,
+    hasUserId: !!userId,
+    apiKeyLength: apiKey?.length,
+    userIdLength: userId?.length,
+  })
+
   if (!apiKey || !userId) {
+    console.error("❌ Missing YCBM credentials!", {
+      apiKey: apiKey ? `${apiKey.substring(0, 5)}...` : "MISSING",
+      userId: userId ? `${userId.substring(0, 8)}...` : "MISSING",
+    })
     return NextResponse.json(
       { error: "YCBM API credentials not configured" },
       { status: 500 }
@@ -61,8 +72,19 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error("YCBM API error response:", errorText)
-      throw new Error(`YCBM API error: ${response.status} - ${errorText}`)
+      console.error("❌ YCBM API error response:", errorText)
+      console.error("Request details:", {
+        url,
+        status: response.status,
+        headers: response.headers,
+      })
+      return NextResponse.json(
+        {
+          error: `YCBM API error: ${response.status}`,
+          details: errorText.substring(0, 200),
+        },
+        { status: response.status }
+      )
     }
 
     const data = await response.json()
