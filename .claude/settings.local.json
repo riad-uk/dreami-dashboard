@@ -7,7 +7,13 @@
       "WebSearch",
       "WebFetch(domain:api.youcanbook.me)",
       "Bash(git add src/auth.ts)",
-      "Bash(git commit -m \"Add explicit AUTH_SECRET config and env validation for Vercel\")"
+      "Bash(git commit -m \"Add explicit AUTH_SECRET config and env validation for Vercel\")",
+      "Bash(rm:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm ls:*)",
+      "Bash(git add:*)",
+      "Bash(git restore:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
