@@ -1,4 +1,5 @@
-import { auth, signOut } from "@/auth"
+import { auth } from "@clerk/nextjs/server"
+import { UserButton } from "@clerk/nextjs"
 import { redirect } from "next/navigation"
 import Link from "next/link"
 
@@ -7,10 +8,10 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const session = await auth()
+  const { userId } = await auth()
 
-  if (!session?.user) {
-    redirect("/auth/signin")
+  if (!userId) {
+    redirect("/sign-in")
   }
 
   return (
@@ -40,23 +41,14 @@ export default async function DashboardLayout({
             </div>
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <span className="text-sm text-gray-700 mr-4">
-                  {session.user.email}
-                </span>
-                <form
-                  action={async () => {
-                    "use server"
-                    await signOut({ redirectTo: "/" })
+                <UserButton 
+                  appearance={{
+                    elements: {
+                      avatarBox: "w-10 h-10"
+                    }
                   }}
-                  className="inline"
-                >
-                  <button
-                    type="submit"
-                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                  >
-                    Sign Out
-                  </button>
-                </form>
+                  afterSignOutUrl="/"
+                />
               </div>
             </div>
           </div>
