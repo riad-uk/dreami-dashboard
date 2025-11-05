@@ -1,16 +1,15 @@
 import { SignIn } from '@clerk/nextjs'
+import Image from 'next/image'
 
 export default function SignInPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--dgreen)]">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">
+          <Image src="/logo.png" alt="Dreami Play Café" width={200} height={80} className="mx-auto" />
+          <h2 className="mt-6 text-center text-3xl font-bold text-gray-900 uppercase darkgreen">
             Dreami Dashboard
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Sign in to access your business management tools
-          </p>
         </div>
         <div className="flex justify-center">
           <SignIn 
