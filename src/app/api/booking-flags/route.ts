@@ -1,23 +1,25 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
-import fs from "fs/promises"
-import path from "path"
+import { kv } from "@vercel/kv"
 
-const filePath = path.join(process.cwd(), "data", "bookingFlags.json")
+const KV_KEY = "booking-flags"
 
 async function readFlags(): Promise<Record<string, { confirmed?: boolean; noShow?: boolean }>> {
   try {
-    const data = await fs.readFile(filePath, "utf8")
-    return JSON.parse(data)
+    const flags = await kv.get<Record<string, { confirmed?: boolean; noShow?: boolean }>>(KV_KEY)
+    return flags || {}
   } catch (e) {
-    await fs.mkdir(path.dirname(filePath), { recursive: true })
-    await fs.writeFile(filePath, JSON.stringify({}), "utf8")
+    console.error("Error reading from KV:", e)
     return {}
   }
 }
 
 async function writeFlags(flags: Record<string, { confirmed?: boolean; noShow?: boolean }>) {
-  await fs.writeFile(filePath, JSON.stringify(flags), "utf8")
+  try {
+    await kv.set(KV_KEY, flags)
+  } catch (e) {
+    console.error("Error writing to KV:", e)
+  }
 }
 
 export async function GET() {
