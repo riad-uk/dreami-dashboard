@@ -1,10 +1,70 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { format } from "date-fns"
+import { format, parse } from "date-fns"
 import type { YCBMBooking } from "@/types/ycbm"
 
-// Calculate units based on appointment type
+const formatDateLocal = (iso: string) => {
+  const d = new Date(iso)
+  const y = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric' }).format(d)
+  const m = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', month: '2-digit' }).format(d)
+  const da = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', day: '2-digit' }).format(d)
+  return `${y}-${m}-${da}`
+}
+
+const formatTimeLocal = (iso: string) => {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
+}
+
+// Format reference with dashes every 4 characters
+const formatReference = (ref: string) => {
+  return ref.match(/.{1,4}/g)?.join('-') || ref
+}
+
+const formatDateInTZ = (iso: string, tz: string) => {
+  const d = new Date(iso)
+  const y = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric' }).format(d)
+  const m = new Intl.DateTimeFormat('en-CA', { timeZone: tz, month: '2-digit' }).format(d)
+  const da = new Intl.DateTimeFormat('en-CA', { timeZone: tz, day: '2-digit' }).format(d)
+  return `${y}-${m}-${da}`
+}
+
+const parseHHmm = (s: string) => {
+  const [h, m] = s.split(':')
+  return Number(h) * 60 + Number(m)
+}
+
+const getSessionTime = (iso: string, tz: string, slots: string[]) => {
+  const minutes = parseHHmm(formatTimeLocal(iso))
+  let best = slots[0]
+  let bestDiff = Math.abs(parseHHmm(best) - minutes)
+  for (const s of slots) {
+    const diff = Math.abs(parseHHmm(s) - minutes)
+    if (diff < bestDiff) {
+      best = s
+      bestDiff = diff
+    }
+  }
+  return best
+}
+
+const getStartISO = (booking: YCBMBooking) => {
+  return booking.startsAtUTC || booking.startsAt || booking.starts
+}
+
+const formatTimeInTZ = (iso: string, tz: string) => {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
+}
+
+const getExactSlot = (booking: YCBMBooking, slots: string[]) => {
+  const iso = getStartISO(booking)
+  const tz = booking.timeZone || 'UTC'
+  const hhmm = formatTimeInTZ(iso, tz)
+  if (slots.includes(hhmm)) return hhmm
+  return getSessionTime(iso, tz, slots)
+}
+
+// Calculate units (slots) based on appointment type
 const getUnits = (booking: YCBMBooking): number => {
   const appointmentType = booking.legacy?.appointmentTypes?.[0]?.name?.toLowerCase() || ""
 
@@ -12,6 +72,20 @@ const getUnits = (booking: YCBMBooking): number => {
     return 2
   }
   return 1
+}
+
+// Calculate actual number of kids
+// Sibling type = 2 kids per unit, others = 1 kid per unit
+const getKids = (booking: YCBMBooking): number => {
+  const units = getUnits(booking)
+  const appointmentType = booking.legacy?.appointmentTypes?.[0]?.name?.toLowerCase() || ""
+  
+  // Sibling type means 2 kids per unit
+  if (appointmentType.includes("sibling") || appointmentType.includes("child + sibling")) {
+    return units * 2  // 1 unit = 2 kids, 2 units = 4 kids
+  }
+  // Other types: 1 kid per unit
+  return units
 }
 
 // Get default date: current date, or next day if after 20:00
@@ -33,6 +107,7 @@ interface SessionGroup {
   time: string
   bookings: YCBMBooking[]
   totalUnits: number
+  totalKids: number
   capacity: number
 }
 
@@ -45,6 +120,8 @@ export default function YCBMPage() {
   const [noShowIds, setNoShowIds] = useState<Set<string>>(new Set())
   const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set())
   const [loadingDetails, setLoadingDetails] = useState<Set<string>>(new Set())
+  const [selectedSession, setSelectedSession] = useState<string | null>(null) // null = show all
+  const [copiedRef, setCopiedRef] = useState<string | null>(null)
 
   const fetchBookings = async (date: string) => {
     setLoading(true)
@@ -62,6 +139,17 @@ export default function YCBMPage() {
 
       const data = await response.json()
       console.log(`Received ${data.bookings?.length || 0} bookings for date ${date}`)
+      if (data.bookings?.length > 0) {
+        console.log('First booking sample:', {
+          id: data.bookings[0].id,
+          title: data.bookings[0].title,
+          starts: data.bookings[0].starts,
+          startsAt: data.bookings[0].startsAt,
+          startsAtUTC: data.bookings[0].startsAtUTC,
+          timeZone: data.bookings[0].timeZone,
+          cancelled: data.bookings[0].cancelled
+        })
+      }
       setBookings(data.bookings || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")
@@ -71,54 +159,110 @@ export default function YCBMPage() {
     }
   }
 
-  // Load no-show status from localStorage
   useEffect(() => {
-    const storedNoShows = localStorage.getItem('ycbm-no-shows')
-    if (storedNoShows) {
-      setNoShowIds(new Set(JSON.parse(storedNoShows)))
+    const applyFlags = async () => {
+      try {
+        const res = await fetch('/api/booking-flags')
+        if (!res.ok) return
+        const data = await res.json()
+        const flags: Record<string, { confirmed?: boolean; noShow?: boolean }> = data.flags || {}
+        const ns = new Set<string>()
+        const cf = new Set<string>()
+        bookings.forEach(b => {
+          const f = flags[b.id]
+          if (f?.noShow) ns.add(b.id)
+          if (f?.confirmed) cf.add(b.id)
+        })
+        setNoShowIds(ns)
+        setConfirmedIds(cf)
+      } catch {}
     }
+    applyFlags()
+  }, [bookings])
 
-    const storedConfirmed = localStorage.getItem('ycbm-confirmed')
-    if (storedConfirmed) {
-      setConfirmedIds(new Set(JSON.parse(storedConfirmed)))
+  // Track which bookings have been modified to avoid unnecessary saves
+  const [modifiedBookings, setModifiedBookings] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    const saveFlags = async () => {
+      // Only save flags for bookings that have been modified
+      const bookingsToSave = bookings.filter(b => modifiedBookings.has(b.id))
+      
+      for (const booking of bookingsToSave) {
+        const payload: any = { bookingId: booking.id }
+        payload.noShow = noShowIds.has(booking.id)
+        payload.confirmed = confirmedIds.has(booking.id)
+        await fetch('/api/booking-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      }
+      
+      // Clear modified set after saving
+      if (bookingsToSave.length > 0) {
+        setModifiedBookings(new Set())
+      }
     }
-  }, [])
-
-  // Save no-show status to localStorage
-  useEffect(() => {
-    localStorage.setItem('ycbm-no-shows', JSON.stringify(Array.from(noShowIds)))
-  }, [noShowIds])
-
-  // Save confirmed status to localStorage
-  useEffect(() => {
-    localStorage.setItem('ycbm-confirmed', JSON.stringify(Array.from(confirmedIds)))
-  }, [confirmedIds])
+    
+    if (modifiedBookings.size > 0) {
+      saveFlags()
+    }
+  }, [noShowIds, confirmedIds, bookings, modifiedBookings])
 
   useEffect(() => {
     fetchBookings(selectedDate)
   }, [selectedDate])
 
   // Toggle no-show status
-  const toggleNoShow = (bookingId: string) => {
+  const toggleNoShow = (bookingId: string, bookingDate: string) => {
+    // Only block changes if date is before today (allow changes on same day)
+    const today = format(new Date(), "yyyy-MM-dd")
+    if (bookingDate < today) {
+      alert("Cannot modify bookings from past dates (before today)")
+      return
+    }
+
+    // Mark this booking as modified
+    setModifiedBookings(prev => new Set(prev).add(bookingId))
+
     setNoShowIds(prev => {
       const newSet = new Set(prev)
       if (newSet.has(bookingId)) {
         newSet.delete(bookingId)
       } else {
         newSet.add(bookingId)
+        // Remove from confirmed if adding to no-show (mutual exclusivity)
+        setConfirmedIds(prevConfirmed => {
+          const newConfirmed = new Set(prevConfirmed)
+          newConfirmed.delete(bookingId)
+          return newConfirmed
+        })
       }
       return newSet
     })
   }
 
   // Toggle confirmed status
-  const toggleConfirmed = (bookingId: string) => {
+  const toggleConfirmed = (bookingId: string, bookingDate: string) => {
+    // Only block changes if date is before today (allow changes on same day)
+    const today = format(new Date(), "yyyy-MM-dd")
+    if (bookingDate < today) {
+      alert("Cannot modify bookings from past dates (before today)")
+      return
+    }
+
+    // Mark this booking as modified
+    setModifiedBookings(prev => new Set(prev).add(bookingId))
+
     setConfirmedIds(prev => {
       const newSet = new Set(prev)
       if (newSet.has(bookingId)) {
         newSet.delete(bookingId)
       } else {
         newSet.add(bookingId)
+        // Remove from no-show if adding to confirmed (mutual exclusivity)
+        setNoShowIds(prevNoShow => {
+          const newNoShow = new Set(prevNoShow)
+          newNoShow.delete(bookingId)
+          return newNoShow
+        })
       }
       return newSet
     })
@@ -149,6 +293,17 @@ export default function YCBMPage() {
     }
   }
 
+  // Copy reference to clipboard
+  const copyReference = async (ref: string) => {
+    try {
+      await navigator.clipboard.writeText(ref)
+      setCopiedRef(ref)
+      setTimeout(() => setCopiedRef(null), 2000) // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
   // Export no-shows to CSV
   const exportNoShowsToCSV = () => {
     const noShowBookings = bookings.filter(b => noShowIds.has(b.id) && !b.cancelled)
@@ -165,8 +320,8 @@ export default function YCBMPage() {
       const type = booking.legacy?.appointmentTypes?.[0]?.name || 'N/A'
 
       return [
-        format(new Date(booking.starts), 'yyyy-MM-dd'),
-        format(new Date(booking.starts), 'HH:mm'),
+        formatDateLocal(getStartISO(booking)),
+        formatTimeLocal(getStartISO(booking)),
         customerName,
         booking.ref,
         type,
@@ -200,25 +355,45 @@ export default function YCBMPage() {
   }
 
   const handleToday = () => {
-    setSelectedDate(getDefaultDate())
+    setSelectedDate(format(new Date(), "yyyy-MM-dd"))
+  }
+
+  const handleYesterday = () => {
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    setSelectedDate(format(yesterday, "yyyy-MM-dd"))
+  }
+
+  const handleTomorrow = () => {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    setSelectedDate(format(tomorrow, "yyyy-MM-dd"))
   }
 
   // Define all possible session times
   const allSessionTimes = ["09:30", "11:30", "13:30", "15:30"]
 
+  console.log(`Starting to filter ${bookings.length} bookings for selectedDate: ${selectedDate}`)
+
   // Filter and group bookings by session time
   const bookingsByTime = bookings.reduce((acc: Record<string, YCBMBooking[]>, booking) => {
     if (booking.cancelled) return acc // Skip cancelled bookings
 
-    // Check if booking is on the selected date
-    const bookingDate = format(new Date(booking.starts), "yyyy-MM-dd")
-    if (bookingDate !== selectedDate) return acc // Skip bookings from other dates
-
     // Filter by no-show if enabled (use local state)
     if (showNoShowOnly && !noShowIds.has(booking.id)) return acc
 
-    // Extract just the time portion (HH:mm) from the starts field
-    const timeOnly = format(new Date(booking.starts), "HH:mm")
+    // Use London timezone for date comparison to match the selected date
+    const startISO = getStartISO(booking)
+    const bookingDate = formatDateLocal(startISO)
+    
+    if (bookingDate !== selectedDate) {
+      console.log(`Filtering out booking: ${booking.id}, startISO=${startISO}, bookingDate=${bookingDate}, selectedDate=${selectedDate}, timeZone=${booking.timeZone}`)
+      return acc
+    }
+    
+    console.log(`✓ Including booking: ${booking.id}, bookingDate=${bookingDate}`)
+
+    const timeOnly = getExactSlot(booking, allSessionTimes)
 
     if (!acc[timeOnly]) {
       acc[timeOnly] = []
@@ -232,74 +407,162 @@ export default function YCBMPage() {
   const groupedSessions: SessionGroup[] = allSessionTimes.map(time => {
     const sessionBookings = bookingsByTime[time] || []
     const totalUnits = sessionBookings.reduce((sum, booking) => sum + getUnits(booking), 0)
+    const totalKids = sessionBookings.reduce((sum, booking) => sum + getKids(booking), 0)
 
     return {
       time,
       bookings: sessionBookings,
       totalUnits,
+      totalKids,
       capacity: 11
     }
   })
 
   console.log(`Grouped into ${groupedSessions.length} sessions:`, groupedSessions.map(s => `${s.time}: ${s.bookings.length} bookings, ${s.totalUnits} units`))
+  console.log('bookingsByTime keys:', Object.keys(bookingsByTime))
 
-  // Calculate no-show statistics (use local state)
-  const totalBookings = bookings.filter(b => !b.cancelled).length
-  const noShowCount = bookings.filter(b => !b.cancelled && noShowIds.has(b.id)).length
+  const totalBookings = groupedSessions.reduce((sum, s) => sum + s.bookings.length, 0)
+  const totalKids = groupedSessions.reduce((sum, s) => sum + s.totalKids, 0)
+  const noShowCount = groupedSessions.reduce((sum, s) => sum + s.bookings.filter(b => noShowIds.has(b.id)).length, 0)
 
   return (
-    <div className="px-4 py-6 sm:px-0">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">YCBM Bookings</h2>
-        <div className="flex items-center gap-2">
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        {/* Action buttons group */}
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={exportNoShowsToCSV}
             disabled={noShowCount === 0}
-            className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center rounded-lg bg-[#557355] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#4a6349] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             Export No-Shows
           </button>
           <button
             onClick={() => setShowNoShowOnly(!showNoShowOnly)}
-            className={`px-4 py-2 text-sm font-medium rounded-md border ${
+            className={`inline-flex items-center rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition-all ${
               showNoShowOnly
-                ? 'bg-red-600 text-white border-red-600'
-                : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+                ? 'bg-gray-900 text-white hover:bg-gray-800'
+                : 'bg-white text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50'
             }`}
           >
             {showNoShowOnly ? 'Show All' : 'No-Shows Only'}
           </button>
+        </div>
+
+        {/* Date navigation group */}
+        <div className="flex flex-wrap items-center gap-2">
           <input
             type="date"
             value={selectedDate}
             onChange={handleDateChange}
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            className="block rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:leading-6"
           />
           <button
+            onClick={handleYesterday}
+            className="inline-flex items-center rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-[#557355] hover:text-white transition-all"
+          >
+            Yesterday
+          </button>
+          <button
             onClick={handleToday}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+            className="inline-flex items-center rounded-lg bg-[#557355] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#4a6349] transition-all"
           >
             Today
+          </button>
+          <button
+            onClick={handleTomorrow}
+            className="inline-flex items-center rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-[#557355] hover:text-white transition-all"
+          >
+            Tomorrow
+          </button>
+          <button
+            onClick={() => fetchBookings(selectedDate)}
+            className="inline-flex items-center rounded-lg bg-[#b4cdb4] px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm hover:bg-[#a0c0a0] transition-all"
+          >
+            Refresh
           </button>
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-          <p className="text-sm text-blue-800">
-            <strong>{format(new Date(selectedDate), "PPPP")}</strong>
-          </p>
+      {/* Stats Overview */}
+      <div className="mb-8 grid grid-cols-1 gap-5 sm:grid-cols-3">
+        <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="truncate text-sm font-medium text-gray-500">Selected Date</dt>
+                  <dd className="mt-1 text-lg font-semibold text-gray-900">
+                    {format(parse(selectedDate, "yyyy-MM-dd", new Date()), "PPP")}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="bg-green-50 border border-green-200 rounded-md p-4">
-          <p className="text-sm text-green-800">
-            Total Bookings: <strong>{totalBookings}</strong>
-          </p>
+        <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="truncate text-sm font-medium text-gray-500">Total Bookings</dt>
+                  <dd className="mt-1 text-lg font-semibold text-gray-900">
+                    {totalBookings} <span className="text-sm text-gray-500">({totalKids} kids)</span>
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-sm text-red-800">
-            No-Shows: <strong>{noShowCount}</strong>
-            {noShowCount > 0 && ` (${((noShowCount / totalBookings) * 100).toFixed(1)}%)`}
-          </p>
+        <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="truncate text-sm font-medium text-gray-500">No-Shows</dt>
+                  <dd className="mt-1 text-lg font-semibold text-gray-900">
+                    {noShowCount}
+                    {noShowCount > 0 && (
+                      <span className="ml-2 text-sm text-gray-600">
+                        ({((noShowCount / totalBookings) * 100).toFixed(1)}%)
+                      </span>
+                    )}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Session Filter Buttons */}
+      <div className="mb-8">
+        <h2 className="text-sm font-semibold text-gray-900 mb-3">Filter by Session</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <button
+            onClick={() => setSelectedSession(null)}
+            className={`col-span-2 sm:col-span-1 rounded-lg px-4 py-3 text-sm font-semibold shadow-sm transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+              selectedSession === null
+                ? 'bg-[#557355] text-white hover:bg-[#4a6349] focus-visible:outline-[#557355]'
+                : 'bg-white text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 hover:ring-[#557355]'
+            }`}
+          >
+            All Sessions
+          </button>
+          {allSessionTimes.map((time) => (
+            <button
+              key={time}
+              onClick={() => setSelectedSession(time)}
+              className={`rounded-lg px-4 py-3 text-sm font-semibold shadow-sm transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                selectedSession === time
+                  ? 'bg-[#557355] text-white hover:bg-[#4a6349] focus-visible:outline-[#557355]'
+                  : 'bg-white text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 hover:ring-[#557355]'
+              }`}
+            >
+              {time}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -315,21 +578,36 @@ export default function YCBMPage() {
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          {groupedSessions.map((session, idx) => {
+        <div className="space-y-6">
+          {groupedSessions
+            .filter(session => selectedSession === null || session.time === selectedSession)
+            .map((session, idx) => {
             const slotsLeft = session.capacity - session.totalUnits
             const percentFull = (session.totalUnits / session.capacity) * 100
 
             return (
-              <div key={idx} className="bg-white shadow rounded-lg overflow-hidden flex flex-col">
-                {/* Session Header */}
-                <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-3">
-                  <h3 className="text-lg font-bold text-white text-center">
+              <div key={idx} className="space-y-4">
+                {/* Session Header - Horizontal */}
+                <div className="overflow-hidden rounded-xl bg-gradient-to-r from-[#557355] to-[#6b8f6b] shadow-lg">
+                  <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+                  <h3 className="text-xl font-bold text-white tracking-tight">
                     {session.time}
                   </h3>
-                  <div className="text-center mt-1">
-                    <div className="text-white text-xl font-bold">
-                      {session.totalUnits}/{session.capacity}
+                  <div className="flex items-center gap-4">
+                    <div className="rounded-lg bg-[#3d5a3d] px-4 py-2 shadow-inner">
+                      <div className="text-2xl font-bold text-white">
+                        {session.totalUnits}/{session.capacity}
+                      </div>
+                    </div>
+                    <div className="flex gap-3">
+                      <div className="rounded-lg bg-white/20 backdrop-blur-sm px-4 py-2">
+                        <div className="text-xs font-medium text-white/80">Bookings</div>
+                        <div className="text-lg font-bold text-white">{session.bookings.length}</div>
+                      </div>
+                      <div className="rounded-lg bg-white/20 backdrop-blur-sm px-4 py-2">
+                        <div className="text-xs font-medium text-white/80">Kids</div>
+                        <div className="text-lg font-bold text-white">{session.totalKids}</div>
+                      </div>
                     </div>
                     <div className={`text-xs font-medium ${
                       slotsLeft === 0 ? 'text-red-200' :
@@ -340,30 +618,34 @@ export default function YCBMPage() {
                     </div>
                   </div>
                   {/* Capacity bar */}
-                  <div className="mt-2 bg-blue-400 rounded-full h-1.5 overflow-hidden">
+                  <div className="flex-1 bg-white/30 rounded-full h-3 overflow-hidden min-w-[120px] shadow-inner">
                     <div
-                      className={`h-full transition-all ${
-                        percentFull >= 100 ? 'bg-red-300' :
-                        percentFull >= 80 ? 'bg-yellow-300' :
-                        'bg-green-300'
+                      className={`h-full transition-all duration-500 ${
+                        percentFull >= 100 ? 'bg-red-400' :
+                        percentFull >= 80 ? 'bg-yellow-400' :
+                        'bg-green-400'
                       }`}
                       style={{ width: `${Math.min(percentFull, 100)}%` }}
                     />
                   </div>
+                  </div>
                 </div>
 
-                {/* Bookings List */}
-                <div className="flex-1 overflow-y-auto max-h-[600px]">
+                {/* Bookings Cards Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                   {session.bookings.length === 0 ? (
-                    <div className="p-4 text-center text-gray-400 text-sm">
-                      No bookings
+                    <div className="col-span-full rounded-xl border-2 border-dashed border-gray-300 p-12 text-center">
+                      <p className="text-sm font-medium text-gray-500">No bookings for this session</p>
                     </div>
                   ) : (
-                    <div className="divide-y divide-gray-200">
-                      {session.bookings.map((booking) => {
+                    session.bookings.map((booking) => {
                         const units = getUnits(booking)
                         // Extract customer name from title (e.g., "Charlotte for Single Child" -> "Charlotte")
                         const customerName = booking.title.split(' for ')[0]
+                        
+                        // Check if this is an exclusive hire booking
+                        const appointmentType = booking.legacy?.appointmentTypes?.[0]?.name || ""
+                        const isExclusiveHire = appointmentType.toLowerCase().includes("dreami exclusive hire")
 
                         const isNoShow = noShowIds.has(booking.id)
                         const isConfirmed = confirmedIds.has(booking.id)
@@ -371,26 +653,53 @@ export default function YCBMPage() {
                         const isLoadingDetails = loadingDetails.has(booking.id)
 
                         return (
-                          <div key={booking.id} className="p-3 hover:bg-gray-50 text-sm">
-                            <div className="space-y-1">
-                              <div className="font-semibold text-gray-900 flex items-center justify-between">
-                                <span>{customerName}</span>
-                                {isNoShow && (
-                                  <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
-                                    No Show
-                                  </span>
-                                )}
+                          <div 
+                            key={booking.id} 
+                            className={`rounded-xl p-5 transition-all duration-200 ${
+                              isExclusiveHire 
+                                ? 'col-span-full bg-gradient-to-br from-purple-50 via-pink-50 to-purple-50 ring-2 ring-purple-400 shadow-lg hover:shadow-xl' 
+                                : 'bg-white shadow-sm hover:shadow-md ring-1 ring-gray-200 hover:ring-gray-300'
+                            }`}
+                          >
+                            <div className="space-y-2">
+                              <div className="font-semibold text-gray-900 flex items-center justify-between flex-wrap gap-2">
+                                <span className={isExclusiveHire ? 'text-lg' : ''}>{customerName}</span>
+                                <div className="flex items-center gap-2">
+                                  {isExclusiveHire && (
+                                    <span className="text-xs bg-gradient-to-r from-purple-600 to-pink-600 text-white px-2 py-1 rounded-full font-bold">
+                                      ⭐ EXCLUSIVE HIRE
+                                    </span>
+                                  )}
+                                  {isNoShow && (
+                                    <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
+                                      No Show
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="text-gray-600 text-xs">Ref: {booking.ref}</div>
+                              {/* Reference with copy button */}
+                              <div className="flex items-center gap-2">
+                                <div className="text-gray-600 text-xs font-mono tracking-wide">
+                                  Ref: {formatReference(booking.ref)}
+                                </div>
+                                <button
+                                  onClick={() => copyReference(booking.ref)}
+                                  className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 transition-all"
+                                  title="Copy reference"
+                                >
+                                  {copiedRef === booking.ref ? 'Copied!' : 'Copy'}
+                                </button>
+                              </div>
                               {booking.legacy?.appointmentTypes && booking.legacy.appointmentTypes.length > 0 && (
-                                <div className="text-gray-600 text-xs">
+                                <div className={`text-xs ${isExclusiveHire ? 'text-purple-700 font-semibold' : 'text-gray-600'}`}>
                                   Type: {booking.legacy.appointmentTypes[0].name}
                                 </div>
                               )}
-                              <div className="flex items-center gap-1">
-                                <span className={`px-2 py-0.5 text-xs font-bold rounded ${
-                                  units === 2 ? 'bg-purple-100 text-purple-800' :
-                                  'bg-blue-100 text-blue-800'
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  isExclusiveHire ? 'bg-purple-200 text-purple-900 ring-1 ring-purple-300' :
+                                  units === 2 ? 'bg-purple-100 text-purple-800 ring-1 ring-purple-200' :
+                                  'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
                                 }`}>
                                   {units} unit{units !== 1 ? 's' : ''}
                                 </span>
@@ -430,34 +739,35 @@ export default function YCBMPage() {
                                 </button>
                               )}
 
-                              {/* Toggle buttons */}
-                              <div className="flex gap-2 mt-2 pt-2 border-t border-gray-100">
-                                <button
-                                  onClick={() => toggleNoShow(booking.id)}
-                                  className={`flex-1 text-xs py-1 px-2 rounded ${
-                                    isNoShow
-                                      ? 'bg-red-100 text-red-700 border border-red-300'
-                                      : 'bg-gray-100 text-gray-600 border border-gray-300'
-                                  }`}
-                                >
-                                  {isNoShow ? '✓ No Show' : 'No Show'}
-                                </button>
-                                <button
-                                  onClick={() => toggleConfirmed(booking.id)}
-                                  className={`flex-1 text-xs py-1 px-2 rounded ${
-                                    isConfirmed
-                                      ? 'bg-green-100 text-green-700 border border-green-300'
-                                      : 'bg-gray-100 text-gray-600 border border-gray-300'
-                                  }`}
-                                >
-                                  {isConfirmed ? '✓ Confirmed' : 'Confirm'}
-                                </button>
-                              </div>
+                              {/* Toggle buttons - Hide for exclusive hire bookings */}
+                              {!isExclusiveHire && (
+                                <div className="flex gap-2 mt-2 pt-2 border-t border-gray-100">
+                                  <button
+                                    onClick={() => toggleNoShow(booking.id, selectedDate)}
+                                    className={`flex-1 text-xs py-1 px-2 rounded ${
+                                      isNoShow
+                                        ? 'bg-red-100 text-red-700 border border-red-300'
+                                        : 'bg-gray-100 text-gray-600 border border-gray-300'
+                                    }`}
+                                  >
+                                    {isNoShow ? '✓ No Show' : 'No Show'}
+                                  </button>
+                                  <button
+                                    onClick={() => toggleConfirmed(booking.id, selectedDate)}
+                                    className={`flex-1 text-xs py-1 px-2 rounded ${
+                                      isConfirmed
+                                        ? 'bg-green-100 text-green-700 border border-green-300'
+                                        : 'bg-gray-100 text-gray-600 border border-gray-300'
+                                    }`}
+                                  >
+                                    {isConfirmed ? '✓ Confirmed' : 'Confirm'}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         )
-                      })}
-                    </div>
+                      })
                   )}
                 </div>
               </div>
@@ -465,6 +775,7 @@ export default function YCBMPage() {
           })}
         </div>
       )}
+      </div>
     </div>
   )
 }
