@@ -33,23 +33,23 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Build the API URL - YCBM requires targetAccountId and displayTimeZone as query params
+    // Use the newer /bookings/query endpoint for better filtering
     const params = new URLSearchParams()
-    params.append("targetAccountId", userId)
-    params.append("displayTimeZone", "UTC")
+    
+    // Search by startsAt to get all bookings starting in the last 7 days
+    params.append("searchTimeRangeCriteria", "startsAt")
+    params.append("sortBy", "startsAt")
+    params.append("pageSize", "500") // Max page size
+    
+    // Get bookings that start from 7 days ago
+    const fromDate = new Date()
+    fromDate.setDate(fromDate.getDate() - 7)
+    params.append("from", fromDate.toISOString())
+    
+    console.log("Requested date:", date)
+    console.log("Fetching bookings starting after:", fromDate.toISOString())
 
-    // Add date filter if provided
-    if (date) {
-      const startDate = new Date(date)
-      startDate.setHours(0, 0, 0, 0)
-      const endDate = new Date(date)
-      endDate.setHours(23, 59, 59, 999)
-
-      params.append("startsAfter", startDate.toISOString())
-      params.append("startsBefore", endDate.toISOString())
-    }
-
-    const url = `https://api.youcanbook.me/v1/bookings?${params.toString()}`
+    const url = `https://api.youcanbook.me/v1/accounts/${userId}/bookings/query?${params.toString()}`
 
     console.log("Fetching YCBM bookings from:", url)
     console.log("API Key (first 10 chars):", apiKey?.substring(0, 10))
@@ -88,9 +88,31 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json()
-    console.log("YCBM API response data:", JSON.stringify(data).substring(0, 200))
-    // YCBM API returns array directly, wrap it for consistent response format
-    return NextResponse.json({ bookings: data })
+    const bookingPageId = process.env.YCBM_BOOKING_PAGE_ID
+    const profileId = process.env.YCBM_PROFILE_ID
+    let bookings = Array.isArray(data) ? data : []
+    
+    console.log("Raw API response count:", bookings.length)
+    if (bookings.length > 0) {
+      console.log("Sample booking:", JSON.stringify(bookings[0], null, 2))
+    }
+    
+    const beforeFilterCount = bookings.length
+    if (bookingPageId || profileId) {
+      bookings = bookings.filter((b: any) =>
+        (!bookingPageId || b.bookingPageId === bookingPageId) &&
+        (!profileId || b.profileId === profileId)
+      )
+    }
+    console.log("YCBM API response count:", bookings.length, {
+      beforeFilter: beforeFilterCount,
+      afterFilter: bookings.length,
+      filteredByBookingPageId: !!bookingPageId,
+      bookingPageId,
+      filteredByProfileId: !!profileId,
+      profileId,
+    })
+    return NextResponse.json({ bookings })
   } catch (error) {
     console.error("Error fetching YCBM bookings:", error)
     return NextResponse.json(
