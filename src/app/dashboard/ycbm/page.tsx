@@ -174,21 +174,31 @@ export default function YCBMPage() {
     applyFlags()
   }, [bookings])
 
+  // Track which bookings have been modified to avoid unnecessary saves
+  const [modifiedBookings, setModifiedBookings] = useState<Set<string>>(new Set())
+
   useEffect(() => {
     const saveFlags = async () => {
-      // Save flags for all current bookings (not just the ones in the sets)
-      // This ensures deselected flags are saved as false
-      for (const booking of bookings) {
+      // Only save flags for bookings that have been modified
+      const bookingsToSave = bookings.filter(b => modifiedBookings.has(b.id))
+      
+      for (const booking of bookingsToSave) {
         const payload: any = { bookingId: booking.id }
         payload.noShow = noShowIds.has(booking.id)
         payload.confirmed = confirmedIds.has(booking.id)
         await fetch('/api/booking-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       }
+      
+      // Clear modified set after saving
+      if (bookingsToSave.length > 0) {
+        setModifiedBookings(new Set())
+      }
     }
-    if (bookings.length > 0) {
+    
+    if (modifiedBookings.size > 0) {
       saveFlags()
     }
-  }, [noShowIds, confirmedIds, bookings])
+  }, [noShowIds, confirmedIds, bookings, modifiedBookings])
 
   useEffect(() => {
     fetchBookings(selectedDate)
@@ -202,6 +212,9 @@ export default function YCBMPage() {
       alert("Cannot modify bookings from past dates (before today)")
       return
     }
+
+    // Mark this booking as modified
+    setModifiedBookings(prev => new Set(prev).add(bookingId))
 
     setNoShowIds(prev => {
       const newSet = new Set(prev)
@@ -228,6 +241,9 @@ export default function YCBMPage() {
       alert("Cannot modify bookings from past dates (before today)")
       return
     }
+
+    // Mark this booking as modified
+    setModifiedBookings(prev => new Set(prev).add(bookingId))
 
     setConfirmedIds(prev => {
       const newSet = new Set(prev)
