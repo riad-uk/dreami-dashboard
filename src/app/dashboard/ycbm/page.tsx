@@ -16,6 +16,11 @@ const formatTimeLocal = (iso: string) => {
   return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
 }
 
+// Format reference with dashes every 4 characters
+const formatReference = (ref: string) => {
+  return ref.match(/.{1,4}/g)?.join('-') || ref
+}
+
 const formatDateInTZ = (iso: string, tz: string) => {
   const d = new Date(iso)
   const y = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric' }).format(d)
@@ -116,6 +121,7 @@ export default function YCBMPage() {
   const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set())
   const [loadingDetails, setLoadingDetails] = useState<Set<string>>(new Set())
   const [selectedSession, setSelectedSession] = useState<string | null>(null) // null = show all
+  const [copiedRef, setCopiedRef] = useState<string | null>(null)
 
   const fetchBookings = async (date: string) => {
     setLoading(true)
@@ -284,6 +290,17 @@ export default function YCBMPage() {
         newSet.delete(booking.id)
         return newSet
       })
+    }
+  }
+
+  // Copy reference to clipboard
+  const copyReference = async (ref: string) => {
+    try {
+      await navigator.clipboard.writeText(ref)
+      setCopiedRef(ref)
+      setTimeout(() => setCopiedRef(null), 2000) // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy:', err)
     }
   }
 
@@ -585,6 +602,10 @@ export default function YCBMPage() {
                         const units = getUnits(booking)
                         // Extract customer name from title (e.g., "Charlotte for Single Child" -> "Charlotte")
                         const customerName = booking.title.split(' for ')[0]
+                        
+                        // Check if this is an exclusive hire booking
+                        const appointmentType = booking.legacy?.appointmentTypes?.[0]?.name || ""
+                        const isExclusiveHire = appointmentType.toLowerCase().includes("dreami exclusive hire")
 
                         const isNoShow = noShowIds.has(booking.id)
                         const isConfirmed = confirmedIds.has(booking.id)
@@ -592,24 +613,51 @@ export default function YCBMPage() {
                         const isLoadingDetails = loadingDetails.has(booking.id)
 
                         return (
-                          <div key={booking.id} className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                          <div 
+                            key={booking.id} 
+                            className={`rounded-lg p-4 hover:shadow-md transition-shadow ${
+                              isExclusiveHire 
+                                ? 'col-span-full bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-300' 
+                                : 'bg-white border border-gray-200'
+                            }`}
+                          >
                             <div className="space-y-2">
-                              <div className="font-semibold text-gray-900 flex items-center justify-between">
-                                <span>{customerName}</span>
-                                {isNoShow && (
-                                  <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
-                                    No Show
-                                  </span>
-                                )}
+                              <div className="font-semibold text-gray-900 flex items-center justify-between flex-wrap gap-2">
+                                <span className={isExclusiveHire ? 'text-lg' : ''}>{customerName}</span>
+                                <div className="flex items-center gap-2">
+                                  {isExclusiveHire && (
+                                    <span className="text-xs bg-gradient-to-r from-purple-600 to-pink-600 text-white px-2 py-1 rounded-full font-bold">
+                                      ⭐ EXCLUSIVE HIRE
+                                    </span>
+                                  )}
+                                  {isNoShow && (
+                                    <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
+                                      No Show
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="text-gray-600 text-xs">Ref: {booking.ref}</div>
+                              {/* Reference with copy button */}
+                              <div className="flex items-center gap-2">
+                                <div className="text-gray-600 text-xs font-mono">
+                                  Ref: {formatReference(booking.ref)}
+                                </div>
+                                <button
+                                  onClick={() => copyReference(booking.ref)}
+                                  className="text-xs px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+                                  title="Copy reference"
+                                >
+                                  {copiedRef === booking.ref ? '✓ Copied' : '📋 Copy'}
+                                </button>
+                              </div>
                               {booking.legacy?.appointmentTypes && booking.legacy.appointmentTypes.length > 0 && (
-                                <div className="text-gray-600 text-xs">
+                                <div className={`text-xs ${isExclusiveHire ? 'text-purple-700 font-semibold' : 'text-gray-600'}`}>
                                   Type: {booking.legacy.appointmentTypes[0].name}
                                 </div>
                               )}
                               <div className="flex items-center gap-1">
                                 <span className={`px-2 py-0.5 text-xs font-bold rounded ${
+                                  isExclusiveHire ? 'bg-purple-200 text-purple-900' :
                                   units === 2 ? 'bg-purple-100 text-purple-800' :
                                   'bg-blue-100 text-blue-800'
                                 }`}>
@@ -651,29 +699,31 @@ export default function YCBMPage() {
                                 </button>
                               )}
 
-                              {/* Toggle buttons */}
-                              <div className="flex gap-2 mt-2 pt-2 border-t border-gray-100">
-                                <button
-                                  onClick={() => toggleNoShow(booking.id, selectedDate)}
-                                  className={`flex-1 text-xs py-1 px-2 rounded ${
-                                    isNoShow
-                                      ? 'bg-red-100 text-red-700 border border-red-300'
-                                      : 'bg-gray-100 text-gray-600 border border-gray-300'
-                                  }`}
-                                >
-                                  {isNoShow ? '✓ No Show' : 'No Show'}
-                                </button>
-                                <button
-                                  onClick={() => toggleConfirmed(booking.id, selectedDate)}
-                                  className={`flex-1 text-xs py-1 px-2 rounded ${
-                                    isConfirmed
-                                      ? 'bg-green-100 text-green-700 border border-green-300'
-                                      : 'bg-gray-100 text-gray-600 border border-gray-300'
-                                  }`}
-                                >
-                                  {isConfirmed ? '✓ Confirmed' : 'Confirm'}
-                                </button>
-                              </div>
+                              {/* Toggle buttons - Hide for exclusive hire bookings */}
+                              {!isExclusiveHire && (
+                                <div className="flex gap-2 mt-2 pt-2 border-t border-gray-100">
+                                  <button
+                                    onClick={() => toggleNoShow(booking.id, selectedDate)}
+                                    className={`flex-1 text-xs py-1 px-2 rounded ${
+                                      isNoShow
+                                        ? 'bg-red-100 text-red-700 border border-red-300'
+                                        : 'bg-gray-100 text-gray-600 border border-gray-300'
+                                    }`}
+                                  >
+                                    {isNoShow ? '✓ No Show' : 'No Show'}
+                                  </button>
+                                  <button
+                                    onClick={() => toggleConfirmed(booking.id, selectedDate)}
+                                    className={`flex-1 text-xs py-1 px-2 rounded ${
+                                      isConfirmed
+                                        ? 'bg-green-100 text-green-700 border border-green-300'
+                                        : 'bg-gray-100 text-gray-600 border border-gray-300'
+                                    }`}
+                                  >
+                                    {isConfirmed ? '✓ Confirmed' : 'Confirm'}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         )
