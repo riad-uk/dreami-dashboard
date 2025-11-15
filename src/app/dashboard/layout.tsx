@@ -1,62 +1,129 @@
-import { auth } from "@clerk/nextjs/server"
-import { UserButton } from "@clerk/nextjs"
-import { redirect } from "next/navigation"
-import Link from "next/link"
+'use client'
 
-export default async function DashboardLayout({
+import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/react'
+import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline'
+import { UserButton, useUser } from "@clerk/nextjs"
+import Link from "next/link"
+import { usePathname } from 'next/navigation'
+
+const navigation = [
+  { name: 'Overview', href: '/dashboard' },
+  { name: 'Dreami Bookings', href: '/dashboard/ycbm' },
+]
+
+function classNames(...classes: string[]) {
+  return classes.filter(Boolean).join(' ')
+}
+
+export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const { userId } = await auth()
-
-  if (!userId) {
-    redirect("/sign-in")
-  }
+  const pathname = usePathname()
+  const { user } = useUser()
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Top Navigation */}
-      <nav className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-gray-900">Dreami Dashboard</h1>
+    <div className="min-h-full">
+      <Disclosure as="nav" className="bg-[#557355]">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 items-center justify-between">
+            <div className="flex items-center">
+              <div className="shrink-0">
+                <h1 className="text-xl font-bold text-white">Dreami Dashboard</h1>
               </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                <Link
-                  href="/dashboard"
-                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Overview
-                </Link>
-                <Link
-                  href="/dashboard/ycbm"
-                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Dreami Bookings
-                </Link>
+              <div className="hidden md:block">
+                <div className="ml-10 flex items-baseline space-x-4">
+                  {navigation.map((item) => {
+                    const isCurrent = pathname === item.href
+                    return (
+                      <Link
+                        key={item.name}
+                        href={item.href}
+                        aria-current={isCurrent ? 'page' : undefined}
+                        className={classNames(
+                          isCurrent
+                            ? 'bg-[#3d5a3d] text-white'
+                            : 'text-white hover:bg-[#4a6349]',
+                          'rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                        )}
+                      >
+                        {item.name}
+                      </Link>
+                    )
+                  })}
+                </div>
               </div>
             </div>
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
+            <div className="hidden md:block">
+              <div className="ml-4 flex items-center md:ml-6">
                 <UserButton 
                   appearance={{
                     elements: {
-                      avatarBox: "w-10 h-10"
+                      avatarBox: "w-8 h-8 rounded-full ring-2 ring-white/20"
                     }
                   }}
                   afterSignOutUrl="/"
                 />
               </div>
             </div>
+            <div className="-mr-2 flex md:hidden">
+              <DisclosureButton className="group relative inline-flex items-center justify-center rounded-md bg-[#557355] p-2 text-white hover:bg-[#4a6349] focus:outline-2 focus:outline-offset-2 focus:outline-white">
+                <span className="absolute -inset-0.5" />
+                <span className="sr-only">Open main menu</span>
+                <Bars3Icon aria-hidden="true" className="block size-6 group-data-open:hidden" />
+                <XMarkIcon aria-hidden="true" className="hidden size-6 group-data-open:block" />
+              </DisclosureButton>
+            </div>
           </div>
         </div>
-      </nav>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <DisclosurePanel className="md:hidden">
+          <div className="space-y-1 px-2 pt-2 pb-3 sm:px-3">
+            {navigation.map((item) => {
+              const isCurrent = pathname === item.href
+              return (
+                <DisclosureButton
+                  key={item.name}
+                  as={Link}
+                  href={item.href}
+                  aria-current={isCurrent ? 'page' : undefined}
+                  className={classNames(
+                    isCurrent
+                      ? 'bg-[#3d5a3d] text-white'
+                      : 'text-white hover:bg-[#4a6349]',
+                    'block rounded-md px-3 py-2 text-base font-medium',
+                  )}
+                >
+                  {item.name}
+                </DisclosureButton>
+              )
+            })}
+          </div>
+          <div className="border-t border-[#4a6349] pt-4 pb-3">
+            <div className="flex items-center px-5">
+              <div className="shrink-0">
+                <UserButton 
+                  appearance={{
+                    elements: {
+                      avatarBox: "w-10 h-10 rounded-full ring-2 ring-white/20"
+                    }
+                  }}
+                  afterSignOutUrl="/"
+                />
+              </div>
+              {user && (
+                <div className="ml-3">
+                  <div className="text-base font-medium text-white">{user.fullName}</div>
+                  <div className="text-sm font-medium text-white/80">{user.primaryEmailAddress?.emailAddress}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </DisclosurePanel>
+      </Disclosure>
+
+      <main>
         {children}
       </main>
     </div>

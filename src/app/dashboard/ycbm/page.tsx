@@ -426,23 +426,24 @@ export default function YCBMPage() {
   const noShowCount = groupedSessions.reduce((sum, s) => sum + s.bookings.filter(b => noShowIds.has(b.id)).length, 0)
 
   return (
-    <div className="px-4 py-6 sm:px-0">
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         {/* Action buttons group */}
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={exportNoShowsToCSV}
             disabled={noShowCount === 0}
-            className="px-4 py-2 text-sm font-medium text-white bg-[#557355] border border-[#557355] rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center rounded-lg bg-[#557355] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#4a6349] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             Export No-Shows
           </button>
           <button
             onClick={() => setShowNoShowOnly(!showNoShowOnly)}
-            className={`px-4 py-2 text-sm font-medium rounded-md border ${
+            className={`inline-flex items-center rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition-all ${
               showNoShowOnly
-                ? 'bg-red-600 text-white border-red-600'
-                : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+                ? 'bg-gray-900 text-white hover:bg-gray-800'
+                : 'bg-white text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50'
             }`}
           >
             {showNoShowOnly ? 'Show All' : 'No-Shows Only'}
@@ -455,79 +456,114 @@ export default function YCBMPage() {
             type="date"
             value={selectedDate}
             onChange={handleDateChange}
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            className="block rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:leading-6"
           />
           <button
             onClick={handleYesterday}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-400 rounded-md hover:bg-gray-200"
+            className="inline-flex items-center rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-[#557355] hover:text-white transition-all"
           >
             Yesterday
           </button>
           <button
             onClick={handleToday}
-            className="px-4 py-2 text-sm font-medium text-white bg-[#557355] border border-[#557355] rounded-md hover:bg-[#3d5a3d]"
+            className="inline-flex items-center rounded-lg bg-[#557355] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#4a6349] transition-all"
           >
             Today
           </button>
           <button
             onClick={handleTomorrow}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-blue-100 border border-blue-400 rounded-md hover:bg-blue-200"
+            className="inline-flex items-center rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-[#557355] hover:text-white transition-all"
           >
             Tomorrow
           </button>
           <button
             onClick={() => fetchBookings(selectedDate)}
-            className="px-4 py-2 text-sm font-medium text-white bg-purple-600 border border-purple-600 rounded-md hover:bg-purple-700"
+            className="inline-flex items-center rounded-lg bg-[#b4cdb4] px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm hover:bg-[#a0c0a0] transition-all"
           >
             Refresh
           </button>
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-          <p className="text-sm text-blue-800">
-            <strong>{format(parse(selectedDate, "yyyy-MM-dd", new Date()), "PPPP")}</strong>
-          </p>
+      {/* Stats Overview */}
+      <div className="mb-8 grid grid-cols-1 gap-5 sm:grid-cols-3">
+        <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="truncate text-sm font-medium text-gray-500">Selected Date</dt>
+                  <dd className="mt-1 text-lg font-semibold text-gray-900">
+                    {format(parse(selectedDate, "yyyy-MM-dd", new Date()), "PPP")}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="bg-green-50 border border-green-200 rounded-md p-4">
-          <p className="text-sm text-green-800">
-            Total Bookings: <strong>{totalBookings}</strong> ({totalKids} kids)
-          </p>
+        <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="truncate text-sm font-medium text-gray-500">Total Bookings</dt>
+                  <dd className="mt-1 text-lg font-semibold text-gray-900">
+                    {totalBookings} <span className="text-sm text-gray-500">({totalKids} kids)</span>
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-sm text-red-800">
-            No-Shows: <strong>{noShowCount}</strong>
-            {noShowCount > 0 && ` (${((noShowCount / totalBookings) * 100).toFixed(1)}%)`}
-          </p>
+        <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="truncate text-sm font-medium text-gray-500">No-Shows</dt>
+                  <dd className="mt-1 text-lg font-semibold text-gray-900">
+                    {noShowCount}
+                    {noShowCount > 0 && (
+                      <span className="ml-2 text-sm text-gray-600">
+                        ({((noShowCount / totalBookings) * 100).toFixed(1)}%)
+                      </span>
+                    )}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Session Filter Buttons */}
-      <div className="mb-6 grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <button
-          onClick={() => setSelectedSession(null)}
-          className={`col-span-2 sm:col-span-1 px-4 py-3 text-sm font-semibold rounded-lg border-2 transition-all ${
-            selectedSession === null
-              ? 'bg-[#557355] text-white border-[#557355] shadow-lg'
-              : 'bg-white text-gray-700 border-gray-300 hover:border-[#557355] hover:text-[#557355]'
-          }`}
-        >
-          All Sessions
-        </button>
-        {allSessionTimes.map((time) => (
+      <div className="mb-8">
+        <h2 className="text-sm font-semibold text-gray-900 mb-3">Filter by Session</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <button
-            key={time}
-            onClick={() => setSelectedSession(time)}
-            className={`px-4 py-3 text-sm font-semibold rounded-lg border-2 transition-all ${
-              selectedSession === time
-                ? 'bg-[#557355] text-white border-[#557355] shadow-lg'
-                : 'bg-white text-gray-700 border-gray-300 hover:border-[#557355] hover:text-[#557355]'
+            onClick={() => setSelectedSession(null)}
+            className={`col-span-2 sm:col-span-1 rounded-lg px-4 py-3 text-sm font-semibold shadow-sm transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+              selectedSession === null
+                ? 'bg-[#557355] text-white hover:bg-[#4a6349] focus-visible:outline-[#557355]'
+                : 'bg-white text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 hover:ring-[#557355]'
             }`}
           >
-            {time}
+            All Sessions
           </button>
-        ))}
+          {allSessionTimes.map((time) => (
+            <button
+              key={time}
+              onClick={() => setSelectedSession(time)}
+              className={`rounded-lg px-4 py-3 text-sm font-semibold shadow-sm transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                selectedSession === time
+                  ? 'bg-[#557355] text-white hover:bg-[#4a6349] focus-visible:outline-[#557355]'
+                  : 'bg-white text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 hover:ring-[#557355]'
+              }`}
+            >
+              {time}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && (
@@ -550,24 +586,27 @@ export default function YCBMPage() {
             const percentFull = (session.totalUnits / session.capacity) * 100
 
             return (
-              <div key={idx} className="space-y-3">
+              <div key={idx} className="space-y-4">
                 {/* Session Header - Horizontal */}
-                <div className="bg-gradient-to-r from-[#557355] to-[#6b8f6b] px-4 py-3 rounded-lg shadow flex flex-wrap items-center justify-between gap-4">
-                  <h3 className="text-lg font-bold text-white">
+                <div className="overflow-hidden rounded-xl bg-gradient-to-r from-[#557355] to-[#6b8f6b] shadow-lg">
+                  <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+                  <h3 className="text-xl font-bold text-white tracking-tight">
                     {session.time}
                   </h3>
                   <div className="flex items-center gap-4">
-                    <div className="text-white text-xl font-bold bg-[#3d5a3d] px-3 py-2 rounded">
-                      {session.totalUnits}/{session.capacity}
-                    </div>
-                    <div className="flex gap-2">
-                      <div className="bg-white/20 rounded px-3 py-1">
-                        <div className="text-white text-xs font-semibold">Bookings</div>
-                        <div className="text-white text-sm font-bold">{session.bookings.length}</div>
+                    <div className="rounded-lg bg-[#3d5a3d] px-4 py-2 shadow-inner">
+                      <div className="text-2xl font-bold text-white">
+                        {session.totalUnits}/{session.capacity}
                       </div>
-                      <div className="bg-white/20 rounded px-3 py-1">
-                        <div className="text-white text-xs font-semibold">Kids</div>
-                        <div className="text-white text-sm font-bold">{session.totalKids}</div>
+                    </div>
+                    <div className="flex gap-3">
+                      <div className="rounded-lg bg-white/20 backdrop-blur-sm px-4 py-2">
+                        <div className="text-xs font-medium text-white/80">Bookings</div>
+                        <div className="text-lg font-bold text-white">{session.bookings.length}</div>
+                      </div>
+                      <div className="rounded-lg bg-white/20 backdrop-blur-sm px-4 py-2">
+                        <div className="text-xs font-medium text-white/80">Kids</div>
+                        <div className="text-lg font-bold text-white">{session.totalKids}</div>
                       </div>
                     </div>
                     <div className={`text-xs font-medium ${
@@ -579,23 +618,24 @@ export default function YCBMPage() {
                     </div>
                   </div>
                   {/* Capacity bar */}
-                  <div className="flex-1 bg-white rounded-full h-2 overflow-hidden min-w-[100px]">
+                  <div className="flex-1 bg-white/30 rounded-full h-3 overflow-hidden min-w-[120px] shadow-inner">
                     <div
-                      className={`h-full transition-all ${
-                        percentFull >= 100 ? 'bg-red-300' :
-                        percentFull >= 80 ? 'bg-yellow-300' :
-                        'bg-green-300'
+                      className={`h-full transition-all duration-500 ${
+                        percentFull >= 100 ? 'bg-red-400' :
+                        percentFull >= 80 ? 'bg-yellow-400' :
+                        'bg-green-400'
                       }`}
                       style={{ width: `${Math.min(percentFull, 100)}%` }}
                     />
                   </div>
+                  </div>
                 </div>
 
                 {/* Bookings Cards Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                   {session.bookings.length === 0 ? (
-                    <div className="col-span-full p-8 text-center text-gray-400 text-sm bg-gray-50 rounded-lg">
-                      No bookings
+                    <div className="col-span-full rounded-xl border-2 border-dashed border-gray-300 p-12 text-center">
+                      <p className="text-sm font-medium text-gray-500">No bookings for this session</p>
                     </div>
                   ) : (
                     session.bookings.map((booking) => {
@@ -615,10 +655,10 @@ export default function YCBMPage() {
                         return (
                           <div 
                             key={booking.id} 
-                            className={`rounded-lg p-4 hover:shadow-md transition-shadow ${
+                            className={`rounded-xl p-5 transition-all duration-200 ${
                               isExclusiveHire 
-                                ? 'col-span-full bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-300' 
-                                : 'bg-white border border-gray-200'
+                                ? 'col-span-full bg-gradient-to-br from-purple-50 via-pink-50 to-purple-50 ring-2 ring-purple-400 shadow-lg hover:shadow-xl' 
+                                : 'bg-white shadow-sm hover:shadow-md ring-1 ring-gray-200 hover:ring-gray-300'
                             }`}
                           >
                             <div className="space-y-2">
@@ -639,15 +679,15 @@ export default function YCBMPage() {
                               </div>
                               {/* Reference with copy button */}
                               <div className="flex items-center gap-2">
-                                <div className="text-gray-600 text-xs font-mono">
+                                <div className="text-gray-600 text-xs font-mono tracking-wide">
                                   Ref: {formatReference(booking.ref)}
                                 </div>
                                 <button
                                   onClick={() => copyReference(booking.ref)}
-                                  className="text-xs px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+                                  className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 transition-all"
                                   title="Copy reference"
                                 >
-                                  {copiedRef === booking.ref ? '✓ Copied' : '📋 Copy'}
+                                  {copiedRef === booking.ref ? 'Copied!' : 'Copy'}
                                 </button>
                               </div>
                               {booking.legacy?.appointmentTypes && booking.legacy.appointmentTypes.length > 0 && (
@@ -655,11 +695,11 @@ export default function YCBMPage() {
                                   Type: {booking.legacy.appointmentTypes[0].name}
                                 </div>
                               )}
-                              <div className="flex items-center gap-1">
-                                <span className={`px-2 py-0.5 text-xs font-bold rounded ${
-                                  isExclusiveHire ? 'bg-purple-200 text-purple-900' :
-                                  units === 2 ? 'bg-purple-100 text-purple-800' :
-                                  'bg-blue-100 text-blue-800'
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  isExclusiveHire ? 'bg-purple-200 text-purple-900 ring-1 ring-purple-300' :
+                                  units === 2 ? 'bg-purple-100 text-purple-800 ring-1 ring-purple-200' :
+                                  'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
                                 }`}>
                                   {units} unit{units !== 1 ? 's' : ''}
                                 </span>
@@ -735,6 +775,7 @@ export default function YCBMPage() {
           })}
         </div>
       )}
+      </div>
     </div>
   )
 }
