@@ -60,7 +60,7 @@ export default function DashboardLayout({
                 <UserButton 
                   appearance={{
                     elements: {
-                      avatarBox: "w-8 h-8 rounded-full ring-2 ring-white/20"
+                      avatarBox: "w-8 h-8 rounded-full ring-2 ring-white"
                     }
                   }}
                   afterSignOutUrl="/"
@@ -106,7 +106,7 @@ export default function DashboardLayout({
                 <UserButton 
                   appearance={{
                     elements: {
-                      avatarBox: "w-10 h-10 rounded-full ring-2 ring-white/20"
+                      avatarBox: "w-10 h-10 rounded-full ring-2 ring-white"
                     }
                   }}
                   afterSignOutUrl="/"
