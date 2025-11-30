@@ -64,10 +64,41 @@ const getExactSlot = (booking: YCBMBooking, slots: string[]) => {
   return getSessionTime(iso, tz, slots)
 }
 
+const getCustomerName = (booking: YCBMBooking): string => {
+  if (booking.customerName) return booking.customerName
+  const title = booking.title || ""
+  const fromTitle = title.split(' for ')[0].trim()
+  if (fromTitle) return fromTitle
+  return title
+}
+
+const parseUnits = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value
+  if (typeof value === "string") {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return null
+}
+
 // Calculate units (slots) based on appointment type
 const getUnits = (booking: YCBMBooking): number => {
-  const appointmentType = booking.legacy?.appointmentTypes?.[0]?.name?.toLowerCase() || ""
+  // Prefer explicit unit counts returned by the API
+  const unitCandidates = [
+    parseUnits(booking.units),
+    parseUnits(booking.unitCount),
+    parseUnits(booking.quantity),
+    parseUnits((booking as any).unitsBooked),
+    parseUnits((booking as any).bookedUnits),
+    parseUnits(booking.legacy?.appointmentTypes?.[0]?.units),
+  ]
 
+  for (const candidate of unitCandidates) {
+    if (candidate !== null) return candidate
+  }
+
+  // Fallback to legacy heuristic based on appointment type name
+  const appointmentType = booking.legacy?.appointmentTypes?.[0]?.name?.toLowerCase() || ""
   if (appointmentType.includes("sibling") || appointmentType.includes("child + sibling")) {
     return 2
   }
@@ -278,7 +309,7 @@ export default function YCBMPage() {
         // Update booking with customer details
         setBookings(prev => prev.map(b =>
           b.id === booking.id
-            ? { ...b, customerEmail: details.email, customerPhone: details.phone }
+            ? { ...b, customerEmail: details.email, customerPhone: details.phone, customerName: details.name || b.customerName }
             : b
         ))
       }
@@ -292,6 +323,26 @@ export default function YCBMPage() {
       })
     }
   }
+
+  // Auto-fetch booking details (including full name) when bookings are loaded
+  useEffect(() => {
+    const fetchAllDetails = async () => {
+      const bookingsNeedingDetails = bookings.filter(
+        b => b.intentId && !b.customerName && !loadingDetails.has(b.id)
+      )
+      
+      // Fetch details for all bookings in parallel (with a limit to avoid overwhelming the API)
+      const batchSize = 10
+      for (let i = 0; i < bookingsNeedingDetails.length; i += batchSize) {
+        const batch = bookingsNeedingDetails.slice(i, i + batchSize)
+        await Promise.all(batch.map(booking => fetchBookingDetails(booking)))
+      }
+    }
+    
+    if (bookings.length > 0) {
+      fetchAllDetails()
+    }
+  }, [bookings.length]) // Only run when bookings count changes (new fetch)
 
   // Copy reference to clipboard
   const copyReference = async (ref: string) => {
@@ -316,7 +367,7 @@ export default function YCBMPage() {
     const headers = ['Date', 'Time', 'Name', 'Reference', 'Type', 'Units', 'Email', 'Phone']
     const rows = noShowBookings.map(booking => {
       const units = getUnits(booking)
-      const customerName = booking.title.split(' for ')[0]
+      const customerName = getCustomerName(booking)
       const type = booking.legacy?.appointmentTypes?.[0]?.name || 'N/A'
 
       return [
@@ -422,6 +473,7 @@ export default function YCBMPage() {
   console.log('bookingsByTime keys:', Object.keys(bookingsByTime))
 
   const totalBookings = groupedSessions.reduce((sum, s) => sum + s.bookings.length, 0)
+  const totalUnitsAll = groupedSessions.reduce((sum, s) => sum + s.totalUnits, 0)
   const totalKids = groupedSessions.reduce((sum, s) => sum + s.totalKids, 0)
   const noShowCount = groupedSessions.reduce((sum, s) => sum + s.bookings.filter(b => noShowIds.has(b.id)).length, 0)
 
@@ -434,7 +486,7 @@ export default function YCBMPage() {
           <button
             onClick={exportNoShowsToCSV}
             disabled={noShowCount === 0}
-            className="inline-flex items-center rounded-lg bg-[#557355] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#4a6349] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            className="inline-flex items-center rounded-lg bg-[#557355] px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm hover:bg-[#4a6349] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             Export No-Shows
           </button>
@@ -478,7 +530,7 @@ export default function YCBMPage() {
           </button>
           <button
             onClick={() => fetchBookings(selectedDate)}
-            className="inline-flex items-center rounded-lg bg-[#b4cdb4] px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm hover:bg-[#a0c0a0] transition-all"
+            className="inline-flex items-center rounded-lg bg-[#b4cdb4] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#a0c0a0] transition-all"
           >
             Refresh
           </button>
@@ -508,7 +560,11 @@ export default function YCBMPage() {
                 <dl>
                   <dt className="truncate text-sm font-medium text-gray-500">Total Bookings</dt>
                   <dd className="mt-1 text-lg font-semibold text-gray-900">
-                    {totalBookings} <span className="text-sm text-gray-500">({totalKids} kids)</span>
+                    {totalBookings}
+                    <span className="text-sm text-gray-500 ml-1">({totalKids} kids)</span>
+                    <div className="text-sm font-medium text-gray-600">
+                      {totalUnitsAll} units total
+                    </div>
                   </dd>
                 </dl>
               </div>
@@ -590,44 +646,64 @@ export default function YCBMPage() {
                 {/* Session Header - Horizontal */}
                 <div className="overflow-hidden rounded-xl bg-gradient-to-r from-[#557355] to-[#6b8f6b] shadow-lg">
                   <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-                  <h3 className="text-xl font-bold text-white tracking-tight">
-                    {session.time}
-                  </h3>
-                  <div className="flex items-center gap-4">
-                    <div className="rounded-lg bg-[#3d5a3d] px-4 py-2 shadow-inner">
-                      <div className="text-2xl font-bold text-white">
-                        {session.totalUnits}/{session.capacity}
+                    <h3 className="text-xl font-bold text-white tracking-tight">
+                      <span className="inline-flex flex-col items-center justify-center rounded-lg bg-[#f4a11f] px-4 py-2 text-white shadow-inner min-h-[72px]">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-white/80">Time</span>
+                        <span className="text-lg font-bold">{session.time}</span>
+                      </span>
+                    </h3>
+                    <div className="flex flex-wrap items-stretch gap-4">
+                      <div className="rounded-lg bg-[#3d5a3d] px-4 py-2 shadow-inner flex flex-col items-center justify-center min-h-[72px]">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-white/80">Units</div>
+                        <div className="text-lg font-bold text-white">
+                          {session.totalUnits}/{session.capacity}
+                        </div>
+                      </div>
+                      <div className="flex gap-3 items-stretch">
+                        <div className="rounded-lg bg-[#3d5a3d] px-4 py-2 shadow-inner flex flex-col items-center justify-center min-h-[72px] text-center">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-white/80">Bookings</div>
+                          <div className="text-lg font-bold text-white">{session.bookings.length}</div>
+                        </div>
+                        <div className="rounded-lg bg-[#3d5a3d] px-4 py-2 shadow-inner flex flex-col items-center justify-center min-h-[72px] text-center">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-white/80">Kids</div>
+                          <div className="text-lg font-bold text-white">{session.totalKids}</div>
+                        </div>
+                      </div>
+                      <div className={`text-xs font-medium flex items-center ${
+                        slotsLeft === 0 ? 'text-red-200' :
+                        slotsLeft <= 2 ? 'text-yellow-200' :
+                        'text-blue-100'
+                      }`}>
+                        {slotsLeft} slot{slotsLeft !== 1 ? 's' : ''} left
                       </div>
                     </div>
-                    <div className="flex gap-3">
-                      <div className="rounded-lg bg-white/20 backdrop-blur-sm px-4 py-2">
-                        <div className="text-xs font-medium text-white/80">Bookings</div>
-                        <div className="text-lg font-bold text-white">{session.bookings.length}</div>
-                      </div>
-                      <div className="rounded-lg bg-white/20 backdrop-blur-sm px-4 py-2">
-                        <div className="text-xs font-medium text-white/80">Kids</div>
-                        <div className="text-lg font-bold text-white">{session.totalKids}</div>
-                      </div>
-                    </div>
-                    <div className={`text-xs font-medium ${
-                      slotsLeft === 0 ? 'text-red-200' :
-                      slotsLeft <= 2 ? 'text-yellow-200' :
-                      'text-blue-100'
-                    }`}>
-                      {slotsLeft} slot{slotsLeft !== 1 ? 's' : ''} left
+                    {/* Capacity bar */}
+                    <div className="flex-1 bg-white/30 rounded-full h-3 overflow-hidden min-w-[120px] shadow-inner">
+                      <div
+                        className={`h-full transition-all duration-500 ${
+                          percentFull >= 100 ? 'bg-red-400' :
+                          percentFull >= 80 ? 'bg-yellow-400' :
+                          'bg-green-400'
+                        }`}
+                        style={{ width: `${Math.min(percentFull, 100)}%` }}
+                      />
                     </div>
                   </div>
-                  {/* Capacity bar */}
-                  <div className="flex-1 bg-white/30 rounded-full h-3 overflow-hidden min-w-[120px] shadow-inner">
-                    <div
-                      className={`h-full transition-all duration-500 ${
-                        percentFull >= 100 ? 'bg-red-400' :
-                        percentFull >= 80 ? 'bg-yellow-400' :
-                        'bg-green-400'
-                      }`}
-                      style={{ width: `${Math.min(percentFull, 100)}%` }}
-                    />
-                  </div>
+                  <div className="px-6 pb-4">
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-white/90">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-full bg-pink-200 border border-pink-400" /> Sibling
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-full bg-yellow-200 border border-yellow-400" /> Baby
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-full bg-blue-200 border border-blue-400" /> Standard
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-full bg-purple-300 border border-purple-500" /> Exclusive hire
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -641,11 +717,14 @@ export default function YCBMPage() {
                     session.bookings.map((booking) => {
                         const units = getUnits(booking)
                         // Extract customer name from title (e.g., "Charlotte for Single Child" -> "Charlotte")
-                        const customerName = booking.title.split(' for ')[0]
+                        const customerName = getCustomerName(booking)
                         
                         // Check if this is an exclusive hire booking
                         const appointmentType = booking.legacy?.appointmentTypes?.[0]?.name || ""
-                        const isExclusiveHire = appointmentType.toLowerCase().includes("dreami exclusive hire")
+                        const appointmentTypeLower = appointmentType.toLowerCase()
+                        const isExclusiveHire = appointmentTypeLower.includes("dreami exclusive hire")
+                        const isSiblingBooking = appointmentTypeLower.includes("sibling")
+                        const isBabyBooking = appointmentTypeLower.includes("baby")
 
                         const isNoShow = noShowIds.has(booking.id)
                         const isConfirmed = confirmedIds.has(booking.id)
@@ -679,8 +758,8 @@ export default function YCBMPage() {
                               </div>
                               {/* Reference with copy button */}
                               <div className="flex items-center gap-2">
-                                <div className="text-gray-600 text-xs font-mono tracking-wide">
-                                  Ref: {formatReference(booking.ref)}
+                                <div className="text-xs font-mono tracking-wide text-gray-800">
+                                  Ref: <span className="font-semibold">{formatReference(booking.ref)}</span>
                                 </div>
                                 <button
                                   onClick={() => copyReference(booking.ref)}
@@ -691,19 +770,18 @@ export default function YCBMPage() {
                                 </button>
                               </div>
                               {booking.legacy?.appointmentTypes && booking.legacy.appointmentTypes.length > 0 && (
-                                <div className={`text-xs ${isExclusiveHire ? 'text-purple-700 font-semibold' : 'text-gray-600'}`}>
-                                  Type: {booking.legacy.appointmentTypes[0].name}
+                                <div className="text-xs">
+                                  <span className="text-gray-600 mr-2">Type:</span>
+                                  <span className={`inline-flex items-center rounded-full px-2.5 py-1 font-semibold ${
+                                    isExclusiveHire ? 'bg-purple-200 text-purple-900 ring-1 ring-purple-300' :
+                                    isSiblingBooking ? 'bg-pink-100 text-pink-800 ring-1 ring-pink-200' :
+                                    isBabyBooking ? 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200' :
+                                    'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
+                                  }`}>
+                                    {booking.legacy.appointmentTypes[0].name} x {units} unit{units !== 1 ? 's' : ''}
+                                  </span>
                                 </div>
                               )}
-                              <div className="flex items-center gap-2">
-                                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                  isExclusiveHire ? 'bg-purple-200 text-purple-900 ring-1 ring-purple-300' :
-                                  units === 2 ? 'bg-purple-100 text-purple-800 ring-1 ring-purple-200' :
-                                  'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
-                                }`}>
-                                  {units} unit{units !== 1 ? 's' : ''}
-                                </span>
-                              </div>
 
                               {/* Customer details */}
                               {hasDetails ? (

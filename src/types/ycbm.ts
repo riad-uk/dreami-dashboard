@@ -18,13 +18,19 @@ export interface YCBMBooking {
   createdAt: string
   organizer: string
   intentId?: string
+  // Unit counts returned by the API (when multiple slots are booked in one go)
+  units?: number
+  unitCount?: number
+  quantity?: number
   legacy?: {
     appointmentTypes?: Array<{
       id: string
       name: string
+      units?: number
     }>
   }
   // Extended details (fetched separately)
   customerEmail?: string
   customerPhone?: string
+  customerName?: string
 }
