@@ -324,6 +324,26 @@ export default function YCBMPage() {
     }
   }
 
+  // Auto-fetch booking details (including full name) when bookings are loaded
+  useEffect(() => {
+    const fetchAllDetails = async () => {
+      const bookingsNeedingDetails = bookings.filter(
+        b => b.intentId && !b.customerName && !loadingDetails.has(b.id)
+      )
+      
+      // Fetch details for all bookings in parallel (with a limit to avoid overwhelming the API)
+      const batchSize = 10
+      for (let i = 0; i < bookingsNeedingDetails.length; i += batchSize) {
+        const batch = bookingsNeedingDetails.slice(i, i + batchSize)
+        await Promise.all(batch.map(booking => fetchBookingDetails(booking)))
+      }
+    }
+    
+    if (bookings.length > 0) {
+      fetchAllDetails()
+    }
+  }, [bookings.length]) // Only run when bookings count changes (new fetch)
+
   // Copy reference to clipboard
   const copyReference = async (ref: string) => {
     try {
