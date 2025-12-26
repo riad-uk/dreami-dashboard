@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { format, parse } from "date-fns"
 import type { YCBMBooking } from "@/types/ycbm"
 
+const allSessionTimes = ["09:30", "11:30", "13:30", "15:30"]
+
 const formatDateLocal = (iso: string) => {
   const d = new Date(iso)
   const y = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric' }).format(d)
@@ -140,6 +142,16 @@ interface SessionGroup {
   totalUnits: number
   totalKids: number
   capacity: number
+  manualBookings: ManualBooking[]
+}
+
+interface ManualBooking {
+  id: string
+  name: string
+  bookingType: string
+  note: string
+  sessionTime: string
+  units: number
 }
 
 export default function YCBMPage() {
@@ -153,6 +165,14 @@ export default function YCBMPage() {
   const [loadingDetails, setLoadingDetails] = useState<Set<string>>(new Set())
   const [selectedSession, setSelectedSession] = useState<string | null>(null) // null = show all
   const [copiedRef, setCopiedRef] = useState<string | null>(null)
+  const [manualByDate, setManualByDate] = useState<Record<string, ManualBooking[]>>({})
+  const manualBookings = manualByDate[selectedDate] || []
+  const [manualName, setManualName] = useState("")
+  const [manualType, setManualType] = useState("")
+  const [manualNote, setManualNote] = useState("")
+  const [manualSession, setManualSession] = useState(allSessionTimes[0])
+  const [manualError, setManualError] = useState<string | null>(null)
+  const [manualLoading, setManualLoading] = useState(false)
 
   const fetchBookings = async (date: string) => {
     setLoading(true)
@@ -239,6 +259,28 @@ export default function YCBMPage() {
 
   useEffect(() => {
     fetchBookings(selectedDate)
+  }, [selectedDate])
+
+  useEffect(() => {
+    const fetchManualBookings = async () => {
+      setManualLoading(true)
+      setManualError(null)
+      try {
+        const res = await fetch(`/api/manual-bookings?date=${selectedDate}`)
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.error || "Failed to load manual bookings")
+        }
+        const data = await res.json()
+        setManualByDate(prev => ({ ...prev, [selectedDate]: data.manualBookings || [] }))
+      } catch (err) {
+        setManualError(err instanceof Error ? err.message : "Failed to load manual bookings")
+        setManualByDate(prev => ({ ...prev, [selectedDate]: [] }))
+      } finally {
+        setManualLoading(false)
+      }
+    }
+    fetchManualBookings()
   }, [selectedDate])
 
   // Toggle no-show status
@@ -421,8 +463,66 @@ export default function YCBMPage() {
     setSelectedDate(format(tomorrow, "yyyy-MM-dd"))
   }
 
-  // Define all possible session times
-  const allSessionTimes = ["09:30", "11:30", "13:30", "15:30"]
+  const handleAddManualBooking = async () => {
+    if (!manualName.trim() || !manualType.trim()) {
+      alert("Please add a name and booking type")
+      return
+    }
+
+    const newBooking: ManualBooking = {
+      id: `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: manualName.trim(),
+      bookingType: manualType.trim(),
+      note: manualNote.trim(),
+      sessionTime: manualSession,
+      units: 1
+    }
+
+    try {
+      setManualError(null)
+      setManualLoading(true)
+      const res = await fetch('/api/manual-bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: selectedDate, booking: newBooking })
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Failed to save manual booking")
+      }
+      const data = await res.json()
+      setManualByDate(prev => ({ ...prev, [selectedDate]: data.manualBookings || [] }))
+    } catch (err) {
+      setManualError(err instanceof Error ? err.message : "Failed to save manual booking")
+      return
+    } finally {
+      setManualLoading(false)
+    }
+
+    setManualName("")
+    setManualType("")
+    setManualNote("")
+  }
+
+  const handleRemoveManualBooking = async (id: string) => {
+    try {
+      setManualError(null)
+      setManualLoading(true)
+      const res = await fetch(`/api/manual-bookings?id=${encodeURIComponent(id)}&date=${encodeURIComponent(selectedDate)}`, {
+        method: 'DELETE'
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Failed to remove manual booking")
+      }
+      const data = await res.json()
+      setManualByDate(prev => ({ ...prev, [selectedDate]: data.manualBookings || [] }))
+    } catch (err) {
+      setManualError(err instanceof Error ? err.message : "Failed to remove manual booking")
+    } finally {
+      setManualLoading(false)
+    }
+  }
 
   console.log(`Starting to filter ${bookings.length} bookings for selectedDate: ${selectedDate}`)
 
@@ -454,25 +554,33 @@ export default function YCBMPage() {
     return acc
   }, {})
 
+  const manualByTime = manualBookings.reduce((acc: Record<string, ManualBooking[]>, booking) => {
+    if (!acc[booking.sessionTime]) acc[booking.sessionTime] = []
+    acc[booking.sessionTime].push(booking)
+    return acc
+  }, {})
+
   // Create session groups for all time slots (even empty ones)
   const groupedSessions: SessionGroup[] = allSessionTimes.map(time => {
     const sessionBookings = bookingsByTime[time] || []
-    const totalUnits = sessionBookings.reduce((sum, booking) => sum + getUnits(booking), 0)
-    const totalKids = sessionBookings.reduce((sum, booking) => sum + getKids(booking), 0)
+    const manualForSession = manualByTime[time] || []
+    const totalUnits = sessionBookings.reduce((sum, booking) => sum + getUnits(booking), 0) + manualForSession.reduce((sum, booking) => sum + booking.units, 0)
+    const totalKids = sessionBookings.reduce((sum, booking) => sum + getKids(booking), 0) + manualForSession.reduce((sum, booking) => sum + booking.units, 0)
 
     return {
       time,
       bookings: sessionBookings,
       totalUnits,
       totalKids,
-      capacity: 11
+      capacity: 11,
+      manualBookings: manualForSession
     }
   })
 
   console.log(`Grouped into ${groupedSessions.length} sessions:`, groupedSessions.map(s => `${s.time}: ${s.bookings.length} bookings, ${s.totalUnits} units`))
   console.log('bookingsByTime keys:', Object.keys(bookingsByTime))
 
-  const totalBookings = groupedSessions.reduce((sum, s) => sum + s.bookings.length, 0)
+  const totalBookings = groupedSessions.reduce((sum, s) => sum + s.bookings.length + s.manualBookings.length, 0)
   const totalUnitsAll = groupedSessions.reduce((sum, s) => sum + s.totalUnits, 0)
   const totalKids = groupedSessions.reduce((sum, s) => sum + s.totalKids, 0)
   const noShowCount = groupedSessions.reduce((sum, s) => sum + s.bookings.filter(b => noShowIds.has(b.id)).length, 0)
@@ -622,6 +730,64 @@ export default function YCBMPage() {
         </div>
       </div>
 
+      {/* Manual booking adder */}
+      <div className="mb-8 relative overflow-hidden rounded-xl bg-gradient-to-r from-amber-50 via-white to-amber-50 shadow ring-2 ring-amber-200 p-5">
+        <div className="absolute left-0 top-0 h-full w-1 bg-amber-500" />
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 rounded-full bg-amber-100 text-amber-900 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
+              Manual booking form
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold text-gray-900">Add manual booking</h3>
+              <p className="text-sm text-gray-700">For rare cases not in YCBM. Saved to share across screens.</p>
+            </div>
+            {manualError && (
+              <p className="text-sm text-red-600">{manualError}</p>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 w-full sm:w-auto">
+            <input
+              type="text"
+              placeholder="Full name"
+              value={manualName}
+              onChange={e => setManualName(e.target.value)}
+              className="rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-amber-200 focus:ring-2 focus:ring-inset focus:ring-amber-500 bg-white/80"
+            />
+            <input
+              type="text"
+              placeholder="Type of booking"
+              value={manualType}
+              onChange={e => setManualType(e.target.value)}
+              className="rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-amber-200 focus:ring-2 focus:ring-inset focus:ring-amber-500 bg-white/80"
+            />
+            <select
+              value={manualSession}
+              onChange={e => setManualSession(e.target.value)}
+              className="rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-amber-200 focus:ring-2 focus:ring-inset focus:ring-amber-500 bg-white/80"
+            >
+              {allSessionTimes.map(time => (
+                <option key={time} value={time}>{time}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              placeholder="Quick note (optional)"
+              value={manualNote}
+              onChange={e => setManualNote(e.target.value)}
+              className="rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-amber-200 focus:ring-2 focus:ring-inset focus:ring-amber-500 bg-white/80"
+            />
+            <button
+              onClick={handleAddManualBooking}
+              disabled={manualLoading}
+              className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-amber-600 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {manualLoading ? 'Saving...' : 'Add'}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-800 rounded-md p-4">
           <p className="font-medium">Error</p>
@@ -709,12 +875,54 @@ export default function YCBMPage() {
 
                 {/* Bookings Cards Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                  {session.bookings.length === 0 ? (
+                  {session.bookings.length + session.manualBookings.length === 0 ? (
                     <div className="col-span-full rounded-xl border-2 border-dashed border-gray-300 p-12 text-center">
                       <p className="text-sm font-medium text-gray-500">No bookings for this session</p>
                     </div>
                   ) : (
-                    session.bookings.map((booking) => {
+                    <>
+                      {session.manualBookings.map((booking) => (
+                        <div
+                          key={booking.id}
+                          className="relative overflow-hidden rounded-xl p-5 bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-50 ring-2 ring-amber-400 shadow-md hover:shadow-lg"
+                        >
+                          <div className="absolute left-0 top-0 h-full w-1 bg-amber-500" />
+                          <div className="space-y-2">
+                            <div className="font-semibold text-gray-900 flex items-center gap-2">
+                              <span className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-amber-500 text-white text-xs font-bold">
+                                M
+                              </span>
+                              <div className="flex flex-col">
+                                <span>{booking.name}</span>
+                                <span className="text-[11px] uppercase tracking-wide text-amber-800 font-bold">
+                                  Manual entry
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-xs font-semibold text-amber-900 bg-white/70 border border-amber-200 rounded px-3 py-1 inline-flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-amber-500" />
+                              Type: {booking.bookingType}
+                            </div>
+                            {booking.note && (
+                              <div className="text-xs text-gray-800 bg-white/80 border border-amber-200 rounded-lg px-3 py-2">
+                                {booking.note}
+                              </div>
+                            )}
+                            <div className="flex gap-2 pt-1">
+                              <span className="text-[11px] text-gray-700 bg-white/80 border border-amber-200 rounded px-2 py-1">
+                                {booking.units} unit
+                              </span>
+                              <button
+                                onClick={() => handleRemoveManualBooking(booking.id)}
+                                className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 hover:bg-red-100"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    {session.bookings.map((booking) => {
                         const units = getUnits(booking)
                         // Extract customer name from title (e.g., "Charlotte for Single Child" -> "Charlotte")
                         const customerName = getCustomerName(booking)
@@ -845,7 +1053,8 @@ export default function YCBMPage() {
                             </div>
                           </div>
                         )
-                      })
+                      })}
+                    </>
                   )}
                 </div>
               </div>
