@@ -5,6 +5,7 @@ import { format, parse } from "date-fns"
 import type { YCBMBooking } from "@/types/ycbm"
 
 const allSessionTimes = ["09:30", "11:30", "13:30", "15:30"]
+const manualTypeOptions = ["Single Child", "Child + Sibling", "Baby"]
 
 const formatDateLocal = (iso: string) => {
   const d = new Date(iso)
@@ -168,9 +169,10 @@ export default function YCBMPage() {
   const [manualByDate, setManualByDate] = useState<Record<string, ManualBooking[]>>({})
   const manualBookings = manualByDate[selectedDate] || []
   const [manualName, setManualName] = useState("")
-  const [manualType, setManualType] = useState("")
+  const [manualType, setManualType] = useState(manualTypeOptions[0])
   const [manualNote, setManualNote] = useState("")
   const [manualSession, setManualSession] = useState(allSessionTimes[0])
+  const [manualUnits, setManualUnits] = useState(1)
   const [manualError, setManualError] = useState<string | null>(null)
   const [manualLoading, setManualLoading] = useState(false)
 
@@ -469,13 +471,18 @@ export default function YCBMPage() {
       return
     }
 
+    if (!Number.isFinite(manualUnits) || manualUnits <= 0) {
+      alert("Please enter at least 1 unit")
+      return
+    }
+
     const newBooking: ManualBooking = {
       id: `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       name: manualName.trim(),
       bookingType: manualType.trim(),
       note: manualNote.trim(),
       sessionTime: manualSession,
-      units: 1
+      units: manualUnits
     }
 
     try {
@@ -500,8 +507,9 @@ export default function YCBMPage() {
     }
 
     setManualName("")
-    setManualType("")
+    setManualType(manualTypeOptions[0])
     setManualNote("")
+    setManualUnits(1)
   }
 
   const handleRemoveManualBooking = async (id: string) => {
@@ -732,21 +740,20 @@ export default function YCBMPage() {
 
       {/* Manual booking adder */}
       <div className="mb-8 relative overflow-hidden rounded-xl bg-gradient-to-r from-amber-50 via-white to-amber-50 shadow ring-2 ring-amber-200 p-5">
-        <div className="absolute left-0 top-0 h-full w-1 bg-amber-500" />
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full bg-amber-100 text-amber-900 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
-              Manual booking form
+            <div className="inline-flex items-center gap-2 rounded-full text-amber-900 text-xs font-semibold uppercase tracking-wide">
+              Manual booking
             </div>
             <div className="space-y-1">
-              <h3 className="text-base font-semibold text-gray-900">Add manual booking</h3>
+              {/* <h3 className="text-base font-semibold text-gray-900">Manual booking</h3> */}
               <p className="text-sm text-gray-700">For rare cases not in YCBM. Saved to share across screens.</p>
             </div>
             {manualError && (
               <p className="text-sm text-red-600">{manualError}</p>
             )}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 w-full sm:w-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-6 gap-3 w-full sm:w-auto">
             <input
               type="text"
               placeholder="Full name"
@@ -754,13 +761,15 @@ export default function YCBMPage() {
               onChange={e => setManualName(e.target.value)}
               className="rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-amber-200 focus:ring-2 focus:ring-inset focus:ring-amber-500 bg-white/80"
             />
-            <input
-              type="text"
-              placeholder="Type of booking"
+            <select
               value={manualType}
               onChange={e => setManualType(e.target.value)}
               className="rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-amber-200 focus:ring-2 focus:ring-inset focus:ring-amber-500 bg-white/80"
-            />
+            >
+              {manualTypeOptions.map(option => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
             <select
               value={manualSession}
               onChange={e => setManualSession(e.target.value)}
@@ -771,8 +780,17 @@ export default function YCBMPage() {
               ))}
             </select>
             <input
+              type="number"
+              min={1}
+              step={1}
+              placeholder="Units"
+              value={manualUnits}
+              onChange={e => setManualUnits(Number(e.target.value) || 0)}
+              className="rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-amber-200 focus:ring-2 focus:ring-inset focus:ring-amber-500 bg-white/80"
+            />
+            <input
               type="text"
-              placeholder="Quick note (optional)"
+              placeholder="Quick note"
               value={manualNote}
               onChange={e => setManualNote(e.target.value)}
               className="rounded-lg border-0 px-4 py-2.5 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-amber-200 focus:ring-2 focus:ring-inset focus:ring-amber-500 bg-white/80"
@@ -886,7 +904,6 @@ export default function YCBMPage() {
                           key={booking.id}
                           className="relative overflow-hidden rounded-xl p-5 bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-50 ring-2 ring-amber-400 shadow-md hover:shadow-lg"
                         >
-                          <div className="absolute left-0 top-0 h-full w-1 bg-amber-500" />
                           <div className="space-y-2">
                             <div className="font-semibold text-gray-900 flex items-center gap-2">
                               <span className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-amber-500 text-white text-xs font-bold">
@@ -910,7 +927,7 @@ export default function YCBMPage() {
                             )}
                             <div className="flex gap-2 pt-1">
                               <span className="text-[11px] text-gray-700 bg-white/80 border border-amber-200 rounded px-2 py-1">
-                                {booking.units} unit
+                                {booking.units} unit{booking.units !== 1 ? 's' : ''}
                               </span>
                               <button
                                 onClick={() => handleRemoveManualBooking(booking.id)}
