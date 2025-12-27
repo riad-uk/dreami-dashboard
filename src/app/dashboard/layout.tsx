@@ -5,6 +5,7 @@ import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline'
 import { UserButton, useUser } from "@clerk/nextjs"
 import Link from "next/link"
 import { usePathname } from 'next/navigation'
+import ShiftReminderBanner from "./components/ShiftReminderBanner"
 
 const navigation = [
   { name: 'Overview', href: '/dashboard' },
@@ -23,9 +24,11 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname()
   const { user } = useUser()
+  const isAdminEmail = user?.primaryEmailAddress?.emailAddress === "one@kanane.com"
+  const navItems = isAdminEmail ? [...navigation, { name: "Admin", href: "/dashboard/admin" }] : navigation
 
   return (
-    <div className="min-h-full">
+    <div className="min-h-screen bg-gray-50">
       <Disclosure as="nav" className="bg-[#557355]">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
@@ -35,7 +38,7 @@ export default function DashboardLayout({
               </div>
               <div className="hidden md:block">
                 <div className="ml-10 flex items-baseline space-x-4">
-                  {navigation.map((item) => {
+                  {navItems.map((item) => {
                     const isCurrent = pathname === item.href
                     return (
                       <Link
@@ -44,12 +47,12 @@ export default function DashboardLayout({
                         aria-current={isCurrent ? 'page' : undefined}
                         className={classNames(
                           isCurrent
-                            ? 'bg-[#3d5a3d] text-white'
+                            ? 'bg-amber-400 text-gray-900 shadow-sm'
                             : 'text-white hover:bg-[#4a6349]',
-                          'rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                          'rounded-md px-3 py-2 text-sm font-semibold transition-colors',
                         )}
                       >
-                        {item.name}
+                        {item.name.toUpperCase()}
                       </Link>
                     )
                   })}
@@ -81,7 +84,7 @@ export default function DashboardLayout({
 
         <DisclosurePanel className="md:hidden">
           <div className="space-y-1 px-2 pt-2 pb-3 sm:px-3">
-            {navigation.map((item) => {
+            {navItems.map((item) => {
               const isCurrent = pathname === item.href
               return (
                 <DisclosureButton
@@ -91,12 +94,12 @@ export default function DashboardLayout({
                   aria-current={isCurrent ? 'page' : undefined}
                   className={classNames(
                     isCurrent
-                      ? 'bg-[#3d5a3d] text-white'
+                      ? 'bg-amber-400 text-gray-900 shadow-sm'
                       : 'text-white hover:bg-[#4a6349]',
-                    'block rounded-md px-3 py-2 text-base font-medium',
+                    'block rounded-md px-3 py-2 text-base font-semibold transition-colors',
                   )}
                 >
-                  {item.name}
+                  {item.name.toUpperCase()}
                 </DisclosureButton>
               )
             })}
@@ -124,6 +127,7 @@ export default function DashboardLayout({
         </DisclosurePanel>
       </Disclosure>
 
+      <ShiftReminderBanner />
       <main>
         {children}
       </main>
