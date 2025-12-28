@@ -10,6 +10,7 @@ import ShiftReminderBanner from "./components/ShiftReminderBanner"
 const navigation = [
   { name: 'Overview', href: '/dashboard' },
   { name: 'Dreami Bookings', href: '/dashboard/ycbm' },
+  { name: 'Cash', href: '/dashboard/cash' },
   { name: 'ROTA', href: '/dashboard/rota' },
 ]
 

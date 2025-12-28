@@ -5,11 +5,21 @@ import { useUser } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 import type { RotaEntry, StaffMember } from "../rota/types"
 
+const todayISO = () => new Date().toISOString().slice(0, 10)
+
 const defaultStaff: StaffMember[] = [
   { name: "Alice", rate: 0 },
   { name: "Ben", rate: 0 },
   { name: "Charlie", rate: 0 },
 ]
+
+const minutesDiff = (start: string, end: string) => {
+  const [sh, sm] = start.split(":").map(Number)
+  const [eh, em] = end.split(":").map(Number)
+  const startMins = sh * 60 + sm
+  const endMins = eh * 60 + em
+  return endMins - startMins
+}
 
 const timeOptions = Array.from({ length: (20 - 8) * 4 + 1 }, (_, i) => {
   const mins = (8 * 60) + i * 15
@@ -45,6 +55,12 @@ export default function AdminPage() {
   const [entryEditEnd, setEntryEditEnd] = useState<string>("17:00")
   const [entryEditNotes, setEntryEditNotes] = useState<string>("")
   const [entryDeletingId, setEntryDeletingId] = useState<string | null>(null)
+  const [entryAddStaff, setEntryAddStaff] = useState<string>("")
+  const [entryAddDate, setEntryAddDate] = useState<string>(todayISO())
+  const [entryAddStart, setEntryAddStart] = useState<string>("09:00")
+  const [entryAddEnd, setEntryAddEnd] = useState<string>("17:00")
+  const [entryAddNotes, setEntryAddNotes] = useState<string>("")
+  const [entryAdding, setEntryAdding] = useState(false)
 
   useEffect(() => {
     if (isLoaded && !isAdminEmail) {
@@ -71,7 +87,9 @@ export default function AdminPage() {
       const res = await fetch("/api/rota/staff", { cache: "no-store" })
       if (!res.ok) throw new Error("Failed to load staff")
       const data = await res.json()
-      setStaffMembers(data.staff || [])
+      const staff = (data.staff || []) as StaffMember[]
+      setStaffMembers(staff)
+      if (!entryAddStaff && staff.length > 0) setEntryAddStaff(staff[0].name)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load staff")
     }
@@ -158,6 +176,57 @@ export default function AdminPage() {
       setError(e instanceof Error ? e.message : "Failed to delete entry")
     } finally {
       setEntryDeletingId(null)
+    }
+  }
+
+  const addEntry = async () => {
+    const staff = entryAddStaff.trim()
+    if (!staff) {
+      alert("Select a staff member")
+      return
+    }
+    const date = entryAddDate.trim()
+    if (!date) {
+      alert("Select a date")
+      return
+    }
+    const diffMins = minutesDiff(entryAddStart, entryAddEnd)
+    if (diffMins <= 0) {
+      alert("Finish time must be after start time")
+      return
+    }
+    const hours = Math.round((diffMins / 60) * 4) / 4
+    if (hours > 24) {
+      alert("Shift cannot exceed 24 hours")
+      return
+    }
+    try {
+      setEntryAdding(true)
+      setError(null)
+      const res = await fetch("/api/rota/entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          staff,
+          date,
+          startTime: entryAddStart,
+          endTime: entryAddEnd,
+          notes: entryAddNotes.trim() || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Failed to add shift")
+      }
+      await fetchEntries()
+      setEntryAddDate(todayISO())
+      setEntryAddStart("09:00")
+      setEntryAddEnd("17:00")
+      setEntryAddNotes("")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add shift")
+    } finally {
+      setEntryAdding(false)
     }
   }
 
@@ -385,6 +454,12 @@ export default function AdminPage() {
     return entry.hours * member.rate
   }
 
+  const entryAddHours = useMemo(() => {
+    const diffMins = minutesDiff(entryAddStart, entryAddEnd)
+    if (diffMins <= 0) return 0
+    return Math.round((diffMins / 60) * 4) / 4
+  }, [entryAddStart, entryAddEnd])
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -598,12 +673,12 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-2 rounded-2xl bg-white shadow-sm ring-1 ring-gray-200 p-6 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">Shift breakdown</p>
-                  <p className="text-xs text-gray-500">Edit any day from here (week/month view).</p>
-                </div>
+	            <div className="lg:col-span-2 rounded-2xl bg-white shadow-sm ring-1 ring-gray-200 p-6 space-y-4">
+	              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+	                <div>
+	                  <p className="text-sm font-semibold text-gray-900">Shift breakdown</p>
+	                  <p className="text-xs text-gray-500">Edit any day from here (week/month view).</p>
+	                </div>
                 <div className="inline-flex rounded-lg bg-gray-50 ring-1 ring-gray-200 p-1">
                   <button
                     onClick={() => setViewMode("week")}
@@ -621,12 +696,85 @@ export default function AdminPage() {
                   >
                     Month
                   </button>
-                </div>
-              </div>
+	                </div>
+	              </div>
 
-              {Object.keys(entriesByDate).length === 0 ? (
-                <p className="text-sm text-gray-500">No shifts found for this {viewMode}.</p>
-              ) : (
+                <div className="rounded-xl bg-gray-50 p-4 ring-1 ring-gray-200">
+                  <p className="text-sm font-semibold text-gray-900 mb-3">Add shift (admin)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-xs font-medium text-gray-600">Staff</label>
+                      <select
+                        value={entryAddStaff}
+                        onChange={e => setEntryAddStaff(e.target.value)}
+                        className="w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-inset focus:ring-[#557355]"
+                      >
+                        {staffMembers.length === 0 && <option value="">No staff</option>}
+                        {staffMembers.map(member => (
+                          <option key={member.name} value={member.name}>{member.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600">Date</label>
+                      <input
+                        type="date"
+                        value={entryAddDate}
+                        onChange={e => setEntryAddDate(e.target.value)}
+                        className="w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-inset focus:ring-[#557355]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600">Start</label>
+                      <select
+                        value={entryAddStart}
+                        onChange={e => setEntryAddStart(e.target.value)}
+                        className="w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-inset focus:ring-[#557355]"
+                      >
+                        {timeOptions.map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600">Finish</label>
+                      <select
+                        value={entryAddEnd}
+                        onChange={e => setEntryAddEnd(e.target.value)}
+                        className="w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-inset focus:ring-[#557355]"
+                      >
+                        {timeOptions.map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1 sm:col-span-5">
+                      <label className="text-xs font-medium text-gray-600">Notes (optional)</label>
+                      <input
+                        value={entryAddNotes}
+                        onChange={e => setEntryAddNotes(e.target.value)}
+                        className="w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-inset focus:ring-[#557355]"
+                        placeholder="e.g. cover / holiday / training"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <p className="text-xs text-gray-600">
+                      Hours calculated: <span className="font-semibold text-gray-900">{entryAddHours.toFixed(2)} hrs</span>
+                    </p>
+                    <button
+                      onClick={addEntry}
+                      disabled={entryAdding || staffMembers.length === 0}
+                      className="inline-flex items-center justify-center rounded-lg bg-[#557355] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#4a6349] disabled:opacity-50 transition-colors"
+                    >
+                      {entryAdding ? "Adding…" : "Add shift"}
+                    </button>
+                  </div>
+                </div>
+	
+	              {Object.keys(entriesByDate).length === 0 ? (
+	                <p className="text-sm text-gray-500">No shifts found for this {viewMode}.</p>
+	              ) : (
                 <div className="space-y-4">
                   {Object.keys(entriesByDate)
                     .sort((a, b) => (a < b ? 1 : -1))
